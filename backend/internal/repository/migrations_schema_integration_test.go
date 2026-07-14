@@ -107,6 +107,17 @@ func TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate(t *testing.T) {
 	requireColumn(t, tx, "scheduler_outbox", "dedup_key", "text", 0, true)
 	requireIndex(t, tx, "scheduler_outbox", "idx_scheduler_outbox_pending_dedup_key")
 
+	// Native sing-box runtime foundation is additive to existing proxies/accounts.
+	requireColumn(t, tx, "proxy_runtime_sources", "source_secret_encrypted", "text", 0, false)
+	requireColumn(t, tx, "proxy_runtime_sources", "encryption_version", "smallint", 0, false)
+	requireColumn(t, tx, "proxy_runtimes", "proxy_id", "bigint", 0, false)
+	requireColumn(t, tx, "proxy_runtimes", "normalized_config_encrypted", "text", 0, false)
+	requireColumn(t, tx, "proxy_runtimes", "node_fingerprint", "character varying", 64, false)
+	requireColumn(t, tx, "proxy_runtimes", "exit_ip", "inet", 0, true)
+	requireIndex(t, tx, "proxy_runtimes", "idx_proxy_runtimes_active_listener")
+	requireIndex(t, tx, "proxy_runtimes", "idx_proxy_runtimes_active_owner_fingerprint")
+	requireIndex(t, tx, "proxy_runtimes", "idx_proxy_runtimes_active_system_fingerprint")
+
 	// ops_system_logs: API key id index for operational log triage
 	requireColumn(t, tx, "ops_system_logs", "api_key_id", "bigint", 0, true)
 	requireIndex(t, tx, "ops_system_logs", "idx_ops_system_logs_api_key_id_created_at")
