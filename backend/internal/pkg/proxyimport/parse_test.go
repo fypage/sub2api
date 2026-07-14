@@ -89,7 +89,7 @@ func TestParseVMessURLStandard(t *testing.T) {
 
 func TestParseVMessStandardJSON(t *testing.T) {
 	payload := `{"v":"2","ps":"VMess Node","add":"Vmess.EXAMPLE.com","port":"8443","id":"` + testUUID + `","aid":"0","scy":"auto","net":"ws","host":"host.example.com","path":"/socket","tls":"tls","sni":"sni.example.com","alpn":"h2,http/1.1","fp":"chrome","type":"none"}`
-	link := "vmess://" + base64.RawStdEncoding.EncodeToString([]byte(payload))
+	link := "vmess://" + base64.RawURLEncoding.EncodeToString([]byte(payload))
 	result, err := ParseShareLink(link)
 	if err != nil {
 		t.Fatal(err)

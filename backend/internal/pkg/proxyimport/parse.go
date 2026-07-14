@@ -55,7 +55,7 @@ func ParseShareLink(raw string) (*Result, error) {
 	case "vless", "trojan":
 		return parseURLLink(raw)
 	case "vmess":
-		if parsed, err := url.Parse(raw); err == nil && parsed.Hostname() != "" {
+		if parsed, err := url.Parse(raw); err == nil && parsed.User != nil && parsed.Hostname() != "" {
 			return parseURLLink(raw)
 		}
 		return parseVMess(raw[schemeEnd+3:])
