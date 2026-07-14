@@ -71,7 +71,7 @@ func ParseSingBoxJSON(input []byte) ([]JSONCandidate, error) {
 
 	candidates := make([]JSONCandidate, 0, len(raws))
 	for i := range nodes {
-		if !isRemoteNodeType(nodes[i].Type) {
+		if !isImportableNode(nodes[i].Type, kinds[i]) {
 			continue
 		}
 		chain, err := resolveDetourChain(i, nodes, kinds, byTag)
@@ -153,7 +153,7 @@ func resolveDetourChain(start int, nodes []rawNode, kinds []string, byTag map[st
 		if seen[next] {
 			return nil, fmt.Errorf("%w: cyclic detour dependency", ErrInvalidInput)
 		}
-		if !isRemoteNodeType(nodes[next].Type) || kinds[current] != "outbound" || kinds[next] != "outbound" {
+		if !isImportableNode(nodes[next].Type, kinds[next]) || kinds[current] != "outbound" || kinds[next] != "outbound" {
 			return nil, fmt.Errorf("%w: unsafe detour dependency", ErrInvalidInput)
 		}
 		seen[next] = true
@@ -190,9 +190,15 @@ func canonicalizeChain(chain []int, raws []json.RawMessage, kinds []string) ([]b
 	return encoded, material, nil
 }
 
-func isRemoteNodeType(value string) bool {
-	switch value {
-	case "socks", "http", "shadowsocks", "vmess", "trojan", "wireguard", "hysteria", "vless", "shadowtls", "tuic", "hysteria2", "anytls", "snell", "naive":
+func isImportableNode(protocol, kind string) bool {
+	if kind == "endpoint" {
+		return protocol == "wireguard"
+	}
+	if kind != "outbound" {
+		return false
+	}
+	switch protocol {
+	case "shadowsocks", "vmess", "trojan", "hysteria", "vless", "shadowtls", "tuic", "hysteria2", "anytls", "snell", "naive":
 		return true
 	default:
 		return false

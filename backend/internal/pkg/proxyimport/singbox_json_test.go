@@ -23,7 +23,7 @@ func TestParseSingBoxJSONAcceptedShapes(t *testing.T) {
 }
 
 func TestParseSingBoxJSONFiltersLogicalOutbounds(t *testing.T) {
-	input := `{"outbounds":[{"type":"direct","tag":"direct"},{"type":"block","tag":"block"},{"type":"dns","tag":"dns"},{"type":"selector","tag":"select","outbounds":["proxy"]},{"type":"urltest","tag":"auto","outbounds":["proxy"]},{"type":"vmess","tag":"proxy","server":"vm.example","server_port":443,"uuid":"` + testUUID + `"}]}`
+	input := `{"outbounds":[{"type":"direct","tag":"direct"},{"type":"block","tag":"block"},{"type":"dns","tag":"dns"},{"type":"http","tag":"official-http","server":"proxy.example"},{"type":"wireguard","tag":"legacy-wg","server":"wg.example"},{"type":"selector","tag":"select","outbounds":["proxy"]},{"type":"urltest","tag":"auto","outbounds":["proxy"]},{"type":"vmess","tag":"proxy","server":"vm.example","server_port":443,"uuid":"` + testUUID + `"}]}`
 	candidates, err := ParseSingBoxJSON([]byte(input))
 	if err != nil {
 		t.Fatal(err)
