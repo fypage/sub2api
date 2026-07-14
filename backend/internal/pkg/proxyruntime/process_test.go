@@ -77,7 +77,11 @@ func TestManagedProcessRejectsOccupiedListener(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = listener.Close() }()
-	port := listener.Addr().(*net.TCPAddr).Port
+	tcpAddress, ok := listener.Addr().(*net.TCPAddr)
+	if !ok {
+		t.Fatalf("unexpected listener address: %T", listener.Addr())
+	}
+	port := tcpAddress.Port
 	_, err = StartManagedProcess(context.Background(), ProcessConfig{
 		BinaryPath: binary, ConfigPath: config, ListenHost: "127.0.0.1", ListenPort: port,
 		ReadyTimeout: time.Second, ProbeInterval: 25 * time.Millisecond, StopTimeout: time.Second,
@@ -123,7 +127,12 @@ func reservePort(t *testing.T) int {
 	if err != nil {
 		t.Fatal(err)
 	}
-	port := listener.Addr().(*net.TCPAddr).Port
+	tcpAddress, ok := listener.Addr().(*net.TCPAddr)
+	if !ok {
+		_ = listener.Close()
+		t.Fatalf("unexpected listener address: %T", listener.Addr())
+	}
+	port := tcpAddress.Port
 	if err := listener.Close(); err != nil {
 		t.Fatal(err)
 	}
