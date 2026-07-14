@@ -168,6 +168,19 @@ A proxy that reaches `api.openai.com` but receives the ChatGPT `Unable to load s
 - Create transactionally where possible and return itemized success/failure results.
 - Never partially bind accounts during import.
 
+## Scheduler compatibility
+
+The v0.1.155 baseline includes the scheduler storm fixes from commits `9033e14b`, `8f328d4a` and `831862b9`. Native runtime work must preserve those guarantees.
+
+- Runtime start, stop, health changes and subscription refreshes must not request a full scheduler snapshot rebuild.
+- Account rebinding caused by runtime failure or proxy fallback must publish bounded, per-account scheduler outbox events, matching the official proxy-expiry path.
+- Batch node import and batch account binding must aggregate changed account IDs and enqueue them in chunks; one event per row and one full rebuild per batch are both forbidden.
+- Concurrent recovery, subscription refresh and administrator actions must coalesce duplicate work.
+- Runtime-only changes that do not alter account schedulability or outbound binding must emit no scheduler event.
+- If an incremental event cannot be persisted, report the failure and retry from durable state; do not silently fall back to a rebuild storm.
+- Tests must assert that proxy/runtime expiry and fallback update affected accounts without invoking the full rebuild path.
+- Event delay metrics must use the original durable event timestamp and must not be reset by retries or coalescing.
+
 ## Upgrade boundary
 
 - `main` follows upstream only.
