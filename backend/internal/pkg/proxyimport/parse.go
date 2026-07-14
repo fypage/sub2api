@@ -20,7 +20,7 @@ var ErrInvalidInput = errors.New("invalid proxy share link")
 type Result struct {
 	Name        string          `json:"name"`
 	Protocol    string          `json:"protocol"`
-	Server      string          `json:"server"`
+	ServerHint  string          `json:"server_hint"`
 	ServerPort  uint16          `json:"server_port"`
 	Fingerprint string          `json:"fingerprint"`
 	Outbound    json.RawMessage `json:"-"`
@@ -55,6 +55,9 @@ func ParseShareLink(raw string) (*Result, error) {
 	case "vless", "trojan":
 		return parseURLLink(raw)
 	case "vmess":
+		if parsed, err := url.Parse(raw); err == nil && parsed.Hostname() != "" {
+			return parseURLLink(raw)
+		}
 		return parseVMess(raw[schemeEnd+3:])
 	case "ss":
 		return parseShadowsocks(raw)
@@ -69,7 +72,7 @@ func finish(name string, out outbound) (*Result, error) {
 		return nil, fmt.Errorf("marshal normalized outbound: %w", err)
 	}
 	sum := sha256.Sum256(canonical)
-	return &Result{Name: name, Protocol: out.Type, Server: out.Server, ServerPort: out.ServerPort, Fingerprint: hex.EncodeToString(sum[:]), Outbound: canonical}, nil
+	return &Result{Name: name, Protocol: out.Type, ServerHint: serverHint(out.Server), ServerPort: out.ServerPort, Fingerprint: hex.EncodeToString(sum[:]), Outbound: canonical}, nil
 }
 
 func parseURLLink(raw string) (*Result, error) {
@@ -87,19 +90,30 @@ func parseURLLink(raw string) (*Result, error) {
 	}
 	protocol := strings.ToLower(u.Scheme)
 	out := outbound{Type: protocol, Server: normalizeServer(u.Hostname()), ServerPort: port}
-	if protocol == "vless" {
+	if protocol == "vless" || protocol == "vmess" {
 		if !validUUID(secret) {
 			return nil, fmt.Errorf("%w: invalid user id", ErrInvalidInput)
 		}
-		if encryption := strings.TrimSpace(u.Query().Get("encryption")); encryption != "" && encryption != "none" {
-			return nil, fmt.Errorf("%w: unsupported vless encryption", ErrInvalidInput)
+		encryption := strings.TrimSpace(u.Query().Get("encryption"))
+		if protocol == "vless" {
+			if encryption != "" && encryption != "none" {
+				return nil, fmt.Errorf("%w: unsupported vless encryption", ErrInvalidInput)
+			}
+			out.Flow = u.Query().Get("flow")
+		} else {
+			if encryption == "" {
+				encryption = "auto"
+			}
+			if !validVMessSecurity(encryption) {
+				return nil, fmt.Errorf("%w: unsupported vmess encryption", ErrInvalidInput)
+			}
+			out.Security = encryption
 		}
 		out.UUID = strings.ToLower(secret)
-		out.Flow = u.Query().Get("flow")
 	} else {
 		out.Password = secret
 	}
-	if err := rejectUnknown(u.Query(), commonQueryKeys(protocol)); err != nil {
+	if err := validateQuery(u.Query(), commonQueryKeys(protocol)); err != nil {
 		return nil, err
 	}
 	out.TLS, err = parseTLS(u.Query(), protocol == "trojan")
@@ -204,6 +218,9 @@ func parseShadowsocks(raw string) (*Result, error) {
 			return nil, ErrInvalidInput
 		}
 		method, password, err = splitSSUserInfo(string(decoded[:at]))
+		if err != nil {
+			return nil, ErrInvalidInput
+		}
 		server, portText, err = splitHostPort(string(decoded[at+1:]))
 	}
 	if err != nil || server == "" {
@@ -227,9 +244,6 @@ func parseShadowsocks(raw string) (*Result, error) {
 		if len(parts) == 2 {
 			out.PluginOpts = parts[1]
 		}
-	}
-	if err := rejectUnknown(u.Query(), map[string]bool{"plugin": true}); err != nil {
-		return nil, err
 	}
 	return finish(name, out)
 }
@@ -310,13 +324,19 @@ func commonQueryKeys(protocol string) map[string]bool {
 		keys["flow"] = true
 		keys["encryption"] = true
 	}
+	if protocol == "vmess" {
+		keys["encryption"] = true
+	}
 	return keys
 }
 
-func rejectUnknown(q url.Values, allowed map[string]bool) error {
-	for key := range q {
+func validateQuery(q url.Values, allowed map[string]bool) error {
+	for key, values := range q {
 		if !allowed[key] {
 			return fmt.Errorf("%w: unsupported parameter", ErrInvalidInput)
+		}
+		if len(values) != 1 {
+			return fmt.Errorf("%w: repeated parameter", ErrInvalidInput)
 		}
 	}
 	return nil
@@ -377,6 +397,22 @@ func splitHostPort(value string) (string, string, error) {
 	return host, port, nil
 }
 func normalizeServer(value string) string { return strings.ToLower(strings.TrimSpace(value)) }
+func serverHint(value string) string {
+	if ip := net.ParseIP(value); ip != nil {
+		if v4 := ip.To4(); v4 != nil {
+			return fmt.Sprintf("%d.%d.x.x", v4[0], v4[1])
+		}
+		parts := strings.Split(value, ":")
+		if len(parts) > 2 {
+			return parts[0] + ":" + parts[1] + ":…"
+		}
+		return "ip"
+	}
+	if len(value) <= 4 {
+		return "…"
+	}
+	return value[:2] + "…" + value[len(value)-3:]
+}
 func fragmentName(value, fallback string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -416,6 +452,15 @@ func validUUID(value string) bool {
 	}
 	return true
 }
+func validVMessSecurity(value string) bool {
+	switch value {
+	case "auto", "none", "zero", "aes-128-gcm", "chacha20-poly1305":
+		return true
+	default:
+		return false
+	}
+}
+
 func validSSMethod(method string) bool {
 	switch method {
 	case "2022-blake3-aes-128-gcm", "2022-blake3-aes-256-gcm", "2022-blake3-chacha20-poly1305", "none", "aes-128-gcm", "aes-192-gcm", "aes-256-gcm", "chacha20-ietf-poly1305", "xchacha20-ietf-poly1305", "aes-128-ctr", "aes-192-ctr", "aes-256-ctr", "aes-128-cfb", "aes-192-cfb", "aes-256-cfb", "rc4-md5", "chacha20-ietf", "xchacha20":

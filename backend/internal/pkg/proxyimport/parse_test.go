@@ -19,28 +19,37 @@ func decodeOutbound(t *testing.T, result *Result) map[string]any {
 	return value
 }
 
+func requireMap(t *testing.T, value any, field string) map[string]any {
+	t.Helper()
+	result, ok := value.(map[string]any)
+	if !ok {
+		t.Fatalf("%s is not an object: %#v", field, value)
+	}
+	return result
+}
+
 func TestParseVLESSRealityWebSocket(t *testing.T) {
 	link := "vless://" + testUUID + "@Example.COM:443?type=ws&security=reality&sni=cdn.example.com&fp=chrome&pbk=public-key&sid=abcd&host=edge.example.com&path=%2Fws#Primary"
 	result, err := ParseShareLink(link)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Name != "Primary" || result.Protocol != "vless" || result.Server != "example.com" || result.ServerPort != 443 {
+	if result.Name != "Primary" || result.Protocol != "vless" || result.ServerHint != "ex…com" || result.ServerPort != 443 {
 		t.Fatalf("unexpected preview: %+v", result)
 	}
 	if len(result.Fingerprint) != 64 || strings.Contains(string(result.Outbound), "Primary") {
 		t.Fatal("fingerprint or canonical name handling is invalid")
 	}
 	out := decodeOutbound(t, result)
-	tls := out["tls"].(map[string]any)
+	tls := requireMap(t, out["tls"], "tls")
 	if tls["server_name"] != "cdn.example.com" {
 		t.Fatalf("unexpected tls: %#v", tls)
 	}
-	reality := tls["reality"].(map[string]any)
+	reality := requireMap(t, tls["reality"], "tls.reality")
 	if reality["public_key"] != "public-key" || reality["short_id"] != "abcd" {
 		t.Fatalf("unexpected reality: %#v", reality)
 	}
-	transport := out["transport"].(map[string]any)
+	transport := requireMap(t, out["transport"], "transport")
 	if transport["type"] != "ws" || transport["path"] != "/ws" {
 		t.Fatalf("unexpected transport: %#v", transport)
 	}
@@ -55,11 +64,26 @@ func TestParseTrojanGRPCDefaultsTLS(t *testing.T) {
 	if out["password"] != "top-secret" {
 		t.Fatal("password was not preserved in encrypted outbound material")
 	}
-	if out["tls"].(map[string]any)["enabled"] != true {
+	if requireMap(t, out["tls"], "tls")["enabled"] != true {
 		t.Fatal("trojan must default to TLS")
 	}
-	if out["transport"].(map[string]any)["service_name"] != "api" {
+	if requireMap(t, out["transport"], "transport")["service_name"] != "api" {
 		t.Fatal("grpc service name missing")
+	}
+}
+
+func TestParseVMessURLStandard(t *testing.T) {
+	link := "vmess://" + testUUID + "@vmess.example.com:443?encryption=aes-128-gcm&type=httpupgrade&host=edge.example.com&path=%2Fup&security=tls&sni=sni.example.com#URL%20VMess"
+	result, err := ParseShareLink(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := decodeOutbound(t, result)
+	if result.Name != "URL VMess" || out["security"] != "aes-128-gcm" || out["uuid"] != testUUID {
+		t.Fatalf("unexpected URL vmess: %#v", out)
+	}
+	if requireMap(t, out["transport"], "transport")["type"] != "httpupgrade" {
+		t.Fatal("httpupgrade transport missing")
 	}
 }
 
@@ -70,7 +94,7 @@ func TestParseVMessStandardJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Name != "VMess Node" || result.Server != "vmess.example.com" || result.ServerPort != 8443 {
+	if result.Name != "VMess Node" || result.ServerHint != "vm…com" || result.ServerPort != 8443 {
 		t.Fatalf("unexpected result: %+v", result)
 	}
 	out := decodeOutbound(t, result)
@@ -82,7 +106,7 @@ func TestParseVMessStandardJSON(t *testing.T) {
 func TestParseShadowsocksSIP002Forms(t *testing.T) {
 	userinfo := base64.RawURLEncoding.EncodeToString([]byte("aes-256-gcm:p@ss:word"))
 	forms := []string{
-		"ss://aes-256-gcm:p%40ss%3Aword@SS.Example.com:8388#plain",
+		"ss://aes-256-gcm:p%40ss%3Aword@SS.Example.com:8388/?unsupported=ignored#plain",
 		"ss://" + userinfo + "@ss.example.com:8388#userinfo",
 		"ss://" + base64.RawURLEncoding.EncodeToString([]byte("aes-256-gcm:p@ss:word@[2001:db8::1]:8388")) + "#legacy",
 	}
@@ -126,6 +150,7 @@ func TestStrictRejectionAndSecretSafeErrors(t *testing.T) {
 	cases := []string{
 		"ftp://" + secret + "@example.com:21",
 		"trojan://" + secret + "@example.com:443?allowInsecure=1",
+		"trojan://" + secret + "@example.com:443?type=ws&type=grpc",
 		"trojan://" + secret + "@example.com:443?security=none",
 		"trojan://" + secret + "@example.com:443?type=kcp",
 		"vless://" + testUUID + "@example.com:443?encryption=legacy",
@@ -153,7 +178,7 @@ func TestResultJSONNeverExposesOutboundSecrets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(encoded), "do-not-expose") || strings.Contains(string(encoded), "outbound") {
+	if strings.Contains(string(encoded), "do-not-expose") || strings.Contains(string(encoded), "example.com") || strings.Contains(string(encoded), "outbound") {
 		t.Fatalf("public result leaked secret material: %s", encoded)
 	}
 }
