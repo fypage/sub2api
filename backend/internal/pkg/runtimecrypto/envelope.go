@@ -140,8 +140,9 @@ func validToken(value string) bool {
 	if value == "" || len(value) > 64 {
 		return false
 	}
+	const allowed = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"
 	for _, r := range value {
-		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_') {
+		if !strings.ContainsRune(allowed, r) {
 			return false
 		}
 	}

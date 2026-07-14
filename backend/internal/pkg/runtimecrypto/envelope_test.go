@@ -2,6 +2,7 @@ package runtimecrypto
 
 import (
 	"bytes"
+	"encoding/base64"
 	"errors"
 	"strings"
 	"testing"
@@ -77,12 +78,14 @@ func TestEnvelopeRotationDecryptsOldAndEncryptsNew(t *testing.T) {
 func TestEnvelopeRejectsTamperingUnknownKeyAndMalformedInput(t *testing.T) {
 	kr, _ := NewKeyring("k1", map[string][]byte{"k1": key(5)})
 	ciphertext, _ := kr.Encrypt("source", []byte("secret"))
-	last := ciphertext[len(ciphertext)-1]
-	replacement := byte('A')
-	if last == replacement {
-		replacement = 'B'
+	parts := strings.Split(ciphertext, ":")
+	payload, err := base64.RawURLEncoding.DecodeString(parts[4])
+	if err != nil {
+		t.Fatal(err)
 	}
-	tampered := ciphertext[:len(ciphertext)-1] + string(replacement)
+	payload[len(payload)-1] ^= 1
+	parts[4] = base64.RawURLEncoding.EncodeToString(payload)
+	tampered := strings.Join(parts, ":")
 	if _, err := kr.Decrypt("source", tampered); err == nil {
 		t.Fatal("tampering must fail")
 	}
