@@ -27,13 +27,13 @@ func TestProxyRuntimeLifecycleLeaseTransitionsAtomically(t *testing.T) {
 	}
 
 	mock.ExpectExec("(?s)WITH changed AS \\(.*UPDATE proxy_runtimes.*status = 'starting'.*UPDATE proxies").
-		WithArgs(int64(42), "{pending,stopped,error,degraded,blocked}").
+		WithArgs(int64(42), `{"pending","stopped","error","degraded","blocked"}`).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	if err := lease.MarkStarting(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	mock.ExpectExec("(?s)WITH changed AS \\(.*UPDATE proxy_runtimes.*status = 'healthy'.*UPDATE proxies").
-		WithArgs(int64(42), "{starting}", int64(1234), "/data/proxy-runtimes/42/config.json").
+		WithArgs(int64(42), `{"starting"}`, int64(1234), "/data/proxy-runtimes/42/config.json").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	if err := lease.MarkHealthy(context.Background(), 1234, "/data/proxy-runtimes/42/config.json"); err != nil {
 		t.Fatal(err)
@@ -77,7 +77,7 @@ func TestProxyRuntimeLifecycleRejectsInvalidTransitionsAndErrors(t *testing.T) {
 	if err := lease.MarkFailed(context.Background(), "SECRET OUTPUT", "safe", false); !errors.Is(err, ErrProxyRuntimeInvalid) {
 		t.Fatalf("invalid error code accepted: %v", err)
 	}
-	mock.ExpectExec("status = 'starting'").WithArgs(int64(7), "{pending,stopped,error,degraded,blocked}").
+	mock.ExpectExec("status = 'starting'").WithArgs(int64(7), `{"pending","stopped","error","degraded","blocked"}`).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	if err := lease.MarkStarting(context.Background()); !errors.Is(err, ErrProxyRuntimeStateConflict) {
 		t.Fatalf("stale transition accepted: %v", err)
