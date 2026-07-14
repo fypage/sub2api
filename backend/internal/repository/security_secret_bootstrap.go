@@ -14,12 +14,15 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/ent/securitysecret"
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/runtimecrypto"
 )
 
 const (
-	securitySecretKeyJWT        = "jwt_secret"
-	securitySecretReadRetryMax  = 5
-	securitySecretReadRetryWait = 10 * time.Millisecond
+	securitySecretKeyJWT              = "jwt_secret"
+	securitySecretKeyProxyRuntimeV1   = "proxy_runtime_encryption_key_v1"
+	proxyRuntimeActiveEncryptionKeyID = "db-v1"
+	securitySecretReadRetryMax        = 5
+	securitySecretReadRetryWait       = 10 * time.Millisecond
 )
 
 var readRandomBytes = rand.Read
@@ -55,6 +58,34 @@ func ensureBootstrapSecrets(ctx context.Context, client *ent.Client, cfg *config
 		log.Println("Warning: JWT secret auto-generated and persisted to database. Consider rotating to a managed secret for production.")
 	}
 	return nil
+}
+
+// LoadProxyRuntimeKeyring returns a durable, rotation-capable keyring for
+// native proxy secrets. It intentionally does not reuse the TOTP key: that key
+// may be generated per process when unset and therefore cannot protect data
+// that must survive restarts or multi-instance deployments.
+func LoadProxyRuntimeKeyring(ctx context.Context, client *ent.Client) (*runtimecrypto.Keyring, error) {
+	if client == nil {
+		return nil, fmt.Errorf("nil ent client")
+	}
+	secretHex, created, err := getOrCreateGeneratedSecuritySecret(ctx, client, securitySecretKeyProxyRuntimeV1, runtimecrypto.AES256KeySize)
+	if err != nil {
+		return nil, fmt.Errorf("ensure proxy runtime encryption key: %w", err)
+	}
+	key, err := hex.DecodeString(secretHex)
+	if err != nil || len(key) != runtimecrypto.AES256KeySize {
+		return nil, fmt.Errorf("stored secret %q must be %d-byte hex", securitySecretKeyProxyRuntimeV1, runtimecrypto.AES256KeySize)
+	}
+	keyring, err := runtimecrypto.NewKeyring(proxyRuntimeActiveEncryptionKeyID, map[string][]byte{
+		proxyRuntimeActiveEncryptionKeyID: key,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("initialize proxy runtime keyring: %w", err)
+	}
+	if created {
+		log.Println("Native proxy runtime encryption key generated and persisted to database.")
+	}
+	return keyring, nil
 }
 
 func getOrCreateGeneratedSecuritySecret(ctx context.Context, client *ent.Client, key string, byteLength int) (string, bool, error) {
