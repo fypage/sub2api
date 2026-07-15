@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Wei-Shaw/sub2api/internal/repository"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/gin-gonic/gin"
 )
@@ -15,7 +14,7 @@ import (
 func TestProxyRuntimePreviewRejectsDisabledFeatureWithoutEcho(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-	handler := NewProxyRuntimeHandler(&repository.ProxyRuntimeAdmin{})
+	handler := NewProxyRuntimeHandler(nil)
 	router.POST("/preview", handler.Preview)
 	secret := "trojan://super-secret@example.com:443"
 	request := httptest.NewRequest(http.MethodPost, "/preview", bytes.NewBufferString(`{"input":"`+secret+`"}`))
@@ -30,7 +29,7 @@ func TestProxyRuntimePreviewRejectsDisabledFeatureWithoutEcho(t *testing.T) {
 func TestProxyRuntimeCreateRequiresAdministratorIdentity(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-	handler := NewProxyRuntimeHandler(&repository.ProxyRuntimeAdmin{})
+	handler := NewProxyRuntimeHandler(nil)
 	router.POST("/native", handler.Create)
 	body := `{"input":"trojan://secret@example.com:443","fingerprint":"` + strings.Repeat("a", 64) + `","visibility":"private"}`
 	request := httptest.NewRequest(http.MethodPost, "/native", bytes.NewBufferString(body))
@@ -49,7 +48,7 @@ func TestProxyRuntimeCreateReadsTypedAdminSubject(t *testing.T) {
 		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 7})
 		c.Next()
 	})
-	handler := NewProxyRuntimeHandler(&repository.ProxyRuntimeAdmin{})
+	handler := NewProxyRuntimeHandler(nil)
 	router.POST("/native", handler.Create)
 	body := `{"input":"trojan://secret@example.com:443","fingerprint":"` + strings.Repeat("a", 64) + `","visibility":"private"}`
 	request := httptest.NewRequest(http.MethodPost, "/native", bytes.NewBufferString(body))

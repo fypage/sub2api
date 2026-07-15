@@ -10,25 +10,8 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/proxyimport"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/runtimecrypto"
+	"github.com/Wei-Shaw/sub2api/internal/service"
 )
-
-type ProxyRuntimePreview struct {
-	Name         string `json:"name"`
-	Protocol     string `json:"protocol"`
-	ServerHint   string `json:"server_hint,omitempty"`
-	Dependencies int    `json:"dependencies"`
-	Fingerprint  string `json:"fingerprint"`
-}
-
-type ProxyRuntimeCreateRequest struct {
-	Name          string
-	OwnerUserID   *int64
-	Input         string
-	Fingerprint   string
-	Visibility    string
-	FallbackMode  string
-	BackupProxyID *int64
-}
 
 type ProxyRuntimeAdmin struct {
 	repository *ProxyRuntimeRepository
@@ -40,7 +23,7 @@ func NewProxyRuntimeAdmin(repo *ProxyRuntimeRepository, manager *ProxyRuntimeMan
 	return &ProxyRuntimeAdmin{repository: repo, manager: manager, keyring: keyring}
 }
 
-func (a *ProxyRuntimeAdmin) Preview(input string) ([]ProxyRuntimePreview, error) {
+func (a *ProxyRuntimeAdmin) Preview(input string) ([]service.ProxyRuntimePreview, error) {
 	if a == nil || a.manager == nil || !a.manager.enabled {
 		return nil, ErrProxyRuntimeInvalid
 	}
@@ -48,12 +31,12 @@ func (a *ProxyRuntimeAdmin) Preview(input string) ([]ProxyRuntimePreview, error)
 	if err != nil {
 		return nil, err
 	}
-	previews := make([]ProxyRuntimePreview, 0, len(share)+len(jsonNodes))
+	previews := make([]service.ProxyRuntimePreview, 0, len(share)+len(jsonNodes))
 	for _, candidate := range share {
-		previews = append(previews, ProxyRuntimePreview{Name: candidate.Name, Protocol: candidate.Protocol, ServerHint: candidate.ServerHint, Fingerprint: candidate.Fingerprint})
+		previews = append(previews, service.ProxyRuntimePreview{Name: candidate.Name, Protocol: candidate.Protocol, ServerHint: candidate.ServerHint, Fingerprint: candidate.Fingerprint})
 	}
 	for _, candidate := range jsonNodes {
-		previews = append(previews, ProxyRuntimePreview{Name: candidate.Name, Protocol: candidate.Protocol, ServerHint: candidate.ServerHint, Dependencies: candidate.Dependencies, Fingerprint: candidate.Fingerprint})
+		previews = append(previews, service.ProxyRuntimePreview{Name: candidate.Name, Protocol: candidate.Protocol, ServerHint: candidate.ServerHint, Dependencies: candidate.Dependencies, Fingerprint: candidate.Fingerprint})
 	}
 	return previews, nil
 }
@@ -72,7 +55,7 @@ func (a *ProxyRuntimeAdmin) Stop(ctx context.Context, runtimeID int64) error {
 	return a.manager.Stop(ctx, runtimeID)
 }
 
-func (a *ProxyRuntimeAdmin) Create(ctx context.Context, request ProxyRuntimeCreateRequest) (*ProxyRuntimeCreated, error) {
+func (a *ProxyRuntimeAdmin) Create(ctx context.Context, request service.ProxyRuntimeCreateRequest) (*service.ProxyRuntimeCreated, error) {
 	if a == nil || a.repository == nil || a.manager == nil || a.keyring == nil || !a.manager.enabled {
 		return nil, ErrProxyRuntimeInvalid
 	}
@@ -134,9 +117,9 @@ func (a *ProxyRuntimeAdmin) Create(ctx context.Context, request ProxyRuntimeCrea
 	}
 	created := result.Items[0]
 	if err := a.manager.Start(ctx, created.RuntimeID); err != nil {
-		return &created, fmt.Errorf("native proxy created but failed to start: %w", err)
+		return &service.ProxyRuntimeCreated{ProxyID: created.ProxyID, RuntimeID: created.RuntimeID}, fmt.Errorf("native proxy created but failed to start: %w", err)
 	}
-	return &created, nil
+	return &service.ProxyRuntimeCreated{ProxyID: created.ProxyID, RuntimeID: created.RuntimeID}, nil
 }
 
 func (r *ProxyRuntimeRepository) AllocateLoopbackPort(ctx context.Context, first, last int) (int, error) {

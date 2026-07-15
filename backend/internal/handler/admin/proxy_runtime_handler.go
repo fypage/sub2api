@@ -2,23 +2,21 @@ package admin
 
 import (
 	"context"
-	"errors"
 	"strconv"
 	"strings"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
-	"github.com/Wei-Shaw/sub2api/internal/repository"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 )
 
 type ProxyRuntimeHandler struct {
-	admin *repository.ProxyRuntimeAdmin
+	admin service.ProxyRuntimeAdminService
 }
 
-func NewProxyRuntimeHandler(admin *repository.ProxyRuntimeAdmin) *ProxyRuntimeHandler {
+func NewProxyRuntimeHandler(admin service.ProxyRuntimeAdminService) *ProxyRuntimeHandler {
 	return &ProxyRuntimeHandler{admin: admin}
 }
 
@@ -71,7 +69,7 @@ func (h *ProxyRuntimeHandler) Create(c *gin.Context) {
 	fingerprint := strings.ToLower(strings.TrimSpace(request.Fingerprint))
 	executeAdminIdempotentJSON(c, "admin.proxy-runtimes.create", request, service.DefaultWriteIdempotencyTTL(), func(ctx context.Context) (any, error) {
 		ownerID := subject.UserID
-		created, err := h.admin.Create(ctx, repository.ProxyRuntimeCreateRequest{
+		created, err := h.admin.Create(ctx, service.ProxyRuntimeCreateRequest{
 			Name: strings.TrimSpace(request.Name), OwnerUserID: &ownerID,
 			Input: request.Input, Fingerprint: fingerprint, Visibility: request.Visibility,
 			FallbackMode: strings.TrimSpace(request.FallbackMode), BackupProxyID: request.BackupProxyID,
@@ -79,9 +77,6 @@ func (h *ProxyRuntimeHandler) Create(c *gin.Context) {
 		if err != nil {
 			if created != nil {
 				return gin.H{"proxy_id": created.ProxyID, "runtime_id": created.RuntimeID, "status": "error"}, nil
-			}
-			if errors.Is(err, repository.ErrProxyRuntimeConflict) {
-				return nil, infraerrors.Conflict("NATIVE_PROXY_CONFLICT", "native proxy node or listener already exists")
 			}
 			return nil, infraerrors.BadRequest("NATIVE_PROXY_CREATE_FAILED", "native proxy creation failed")
 		}
