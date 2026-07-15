@@ -23,6 +23,9 @@ ARG SING_BOX_ARM64_SHA256=edec18488af35a93cf8b362063146fdd7b557ef9862710ee77a1f4
 # -----------------------------------------------------------------------------
 FROM ${NODE_IMAGE} AS frontend-builder
 ARG NPM_CONFIG_REGISTRY
+# vue-tsc + Vite exceeds Node's auto-detected cgroup heap on small builders.
+# Keep the build deterministic while remaining below a 2 GiB builder limit.
+ENV NODE_OPTIONS=--max-old-space-size=1536
 
 WORKDIR /app/frontend
 
