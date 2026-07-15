@@ -14,6 +14,9 @@ ARG POSTGRES_IMAGE=postgres:18-alpine
 ARG GOPROXY=https://goproxy.cn,direct
 ARG GOSUMDB=sum.golang.google.cn
 ARG NPM_CONFIG_REGISTRY=
+ARG SING_BOX_VERSION=1.13.14
+ARG SING_BOX_AMD64_SHA256=d5b46de6498427bccfeb87dbafcde4dbefdfe35680020d07d286ad915f0bfb34
+ARG SING_BOX_ARM64_SHA256=edec18488af35a93cf8b362063146fdd7b557ef9862710ee77a1f4adb5c70118
 
 # -----------------------------------------------------------------------------
 # Stage 1: Frontend Builder
@@ -89,7 +92,28 @@ RUN VERSION_VALUE="${VERSION}" && \
 FROM ${POSTGRES_IMAGE} AS pg-client
 
 # -----------------------------------------------------------------------------
-# Stage 4: Final Runtime Image
+# Stage 4: Pinned sing-box runtime
+# -----------------------------------------------------------------------------
+FROM ${ALPINE_IMAGE} AS sing-box-runtime
+ARG TARGETARCH
+ARG SING_BOX_VERSION
+ARG SING_BOX_AMD64_SHA256
+ARG SING_BOX_ARM64_SHA256
+RUN apk add --no-cache ca-certificates curl tar && \
+    case "${TARGETARCH}" in \
+      amd64) SING_BOX_SHA256="${SING_BOX_AMD64_SHA256}" ;; \
+      arm64) SING_BOX_SHA256="${SING_BOX_ARM64_SHA256}" ;; \
+      *) echo "unsupported sing-box architecture: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac && \
+    ARCHIVE="sing-box-${SING_BOX_VERSION}-linux-${TARGETARCH}-musl.tar.gz" && \
+    curl -fsSL --retry 3 -o "/tmp/${ARCHIVE}" "https://github.com/SagerNet/sing-box/releases/download/v${SING_BOX_VERSION}/${ARCHIVE}" && \
+    echo "${SING_BOX_SHA256}  /tmp/${ARCHIVE}" | sha256sum -c - && \
+    tar -xzf "/tmp/${ARCHIVE}" -C /tmp && \
+    install -m 0755 "/tmp/sing-box-${SING_BOX_VERSION}-linux-${TARGETARCH}-musl/sing-box" /usr/local/bin/sing-box && \
+    /usr/local/bin/sing-box version
+
+# -----------------------------------------------------------------------------
+# Stage 5: Final Runtime Image
 # -----------------------------------------------------------------------------
 FROM ${ALPINE_IMAGE}
 
@@ -116,6 +140,7 @@ RUN apk add --no-cache \
 COPY --from=pg-client /usr/local/bin/pg_dump /usr/local/bin/pg_dump
 COPY --from=pg-client /usr/local/bin/psql /usr/local/bin/psql
 COPY --from=pg-client /usr/local/lib/libpq.so.5* /usr/local/lib/
+COPY --from=sing-box-runtime /usr/local/bin/sing-box /usr/local/bin/sing-box
 
 # Create non-root user
 RUN addgroup -g 1000 sub2api && \
