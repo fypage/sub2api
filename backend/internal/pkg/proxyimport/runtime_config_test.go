@@ -2,6 +2,7 @@ package proxyimport
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -99,6 +100,48 @@ func TestBuildJSONRuntimeConfigPreservesEndpointKind(t *testing.T) {
 	}
 	if requireMap(t, config["route"], "route")["final"] != "runtime-endpoint-0" {
 		t.Fatal("route final does not target endpoint")
+	}
+}
+
+func TestBuildCanonicalRuntimeConfigAcceptsNormalizedShareLinkOutbound(t *testing.T) {
+	result, err := ParseShareLink("trojan://secret@example.com:443#node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := BuildCanonicalRuntimeConfig(result.Outbound, testListener())
+	if err != nil {
+		t.Fatal(err)
+	}
+	outbounds := requireSlice(t, decodeConfig(t, raw)["outbounds"], "outbounds")
+	if requireMap(t, outbounds[0], "outbounds[0]")["type"] != "trojan" {
+		t.Fatalf("normalized share-link outbound not rebuilt: %s", raw)
+	}
+}
+
+func TestBuildCanonicalRuntimeConfigReconstructsDependencyChain(t *testing.T) {
+	canonical := []byte(`[{"@kind":"outbound","type":"vless","server":"one.example","server_port":443,"uuid":"11111111-1111-1111-1111-111111111111","detour":"@dependency:1"},{"@kind":"outbound","type":"shadowsocks","server":"two.example","server_port":8388,"method":"aes-128-gcm","password":"secret"}]`)
+	raw, err := BuildCanonicalRuntimeConfig(canonical, testListener())
+	if err != nil {
+		t.Fatal(err)
+	}
+	outbounds := requireSlice(t, decodeConfig(t, raw)["outbounds"], "outbounds")
+	first := requireMap(t, outbounds[0], "outbounds[0]")
+	second := requireMap(t, outbounds[1], "outbounds[1]")
+	if first["detour"] != second["tag"] || first["tag"] == second["tag"] {
+		t.Fatalf("dependency chain was not reconstructed: %#v", outbounds)
+	}
+}
+
+func TestBuildCanonicalRuntimeConfigRejectsTampering(t *testing.T) {
+	cases := [][]byte{
+		[]byte(`[{"@kind":"file","type":"vless"}]`),
+		[]byte(`[{"@kind":"outbound","type":"vless","detour":"wrong"},{"@kind":"outbound","type":"trojan"}]`),
+		[]byte(`[{"@kind":"outbound","type":"direct"}]`),
+	}
+	for _, input := range cases {
+		if _, err := BuildCanonicalRuntimeConfig(input, testListener()); !errors.Is(err, ErrInvalidInput) {
+			t.Fatalf("tampered canonical chain accepted: %s %v", input, err)
+		}
 	}
 }
 

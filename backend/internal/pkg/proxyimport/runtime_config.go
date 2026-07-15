@@ -29,6 +29,55 @@ func BuildJSONRuntimeConfig(candidate JSONCandidate, listener RuntimeListener) (
 	return buildRuntimeConfig(candidate.Materials, listener)
 }
 
+// BuildCanonicalRuntimeConfig reconstructs a validated runtime configuration
+// from the canonical encrypted node chain persisted by the import workflow.
+func BuildCanonicalRuntimeConfig(canonical []byte, listener RuntimeListener) ([]byte, error) {
+	canonical = bytes.TrimSpace(canonical)
+	if len(canonical) == 0 || len(canonical) > maxSingBoxJSONBytes {
+		return nil, fmt.Errorf("%w: invalid canonical node chain", ErrInvalidInput)
+	}
+	// Share-link imports persist one normalized outbound object, while JSON
+	// imports persist the canonical dependency array produced by ParseSingBoxJSON.
+	if canonical[0] == '{' {
+		candidates, err := ParseSingBoxJSON(canonical)
+		if err != nil || len(candidates) != 1 {
+			return nil, fmt.Errorf("%w: invalid canonical single node", ErrInvalidInput)
+		}
+		return BuildJSONRuntimeConfig(candidates[0], listener)
+	}
+	var objects []map[string]any
+	decoder := json.NewDecoder(bytes.NewReader(canonical))
+	decoder.UseNumber()
+	if err := decoder.Decode(&objects); err != nil || len(objects) == 0 || len(objects) > maxJSONNodes {
+		return nil, fmt.Errorf("%w: invalid canonical node chain", ErrInvalidInput)
+	}
+	materials := make([]NodeMaterial, 0, len(objects))
+	for index, object := range objects {
+		kind, ok := object["@kind"].(string)
+		if !ok || (kind != "outbound" && kind != "endpoint") {
+			return nil, fmt.Errorf("%w: invalid canonical material kind", ErrInvalidInput)
+		}
+		delete(object, "@kind")
+		if index+1 < len(objects) {
+			expected := fmt.Sprintf("@dependency:%d", index+1)
+			if object["detour"] != expected || kind != "outbound" {
+				return nil, fmt.Errorf("%w: invalid canonical dependency", ErrInvalidInput)
+			}
+			object["tag"] = fmt.Sprintf("canonical-%d", index)
+			object["detour"] = fmt.Sprintf("canonical-%d", index+1)
+		} else {
+			delete(object, "detour")
+			object["tag"] = fmt.Sprintf("canonical-%d", index)
+		}
+		raw, err := json.Marshal(object)
+		if err != nil {
+			return nil, fmt.Errorf("marshal canonical node: %w", err)
+		}
+		materials = append(materials, NodeMaterial{Kind: kind, Raw: raw})
+	}
+	return buildRuntimeConfig(materials, listener)
+}
+
 func buildRuntimeConfig(materials []NodeMaterial, listener RuntimeListener) ([]byte, error) {
 	if !validRuntimeListener(listener) || len(materials) == 0 || len(materials) > maxJSONNodes {
 		return nil, fmt.Errorf("%w: invalid runtime config input", ErrInvalidInput)

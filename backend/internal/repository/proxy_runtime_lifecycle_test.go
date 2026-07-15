@@ -18,16 +18,16 @@ func TestProxyRuntimeLifecycleLeaseTransitionsAtomically(t *testing.T) {
 		t.Fatalf("lease acquisition failed: %v %v", acquired, err)
 	}
 
-	mock.ExpectQuery("SELECT id, proxy_id, normalized_config_encrypted").WithArgs(int64(42)).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "proxy_id", "normalized_config_encrypted", "encryption_version", "listen_host", "listen_port", "status", "auto_start", "restart_count"}).
-			AddRow(42, 9, "prx:v1:key:config:cipher", 1, "127.0.0.1", 21001, "pending", true, 0))
+	mock.ExpectQuery("SELECT r.id, r.proxy_id, r.normalized_config_encrypted").WithArgs(int64(42)).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "proxy_id", "normalized_config_encrypted", "encryption_version", "listen_host", "listen_port", "username", "password", "status", "auto_start", "restart_count"}).
+			AddRow(42, 9, "prx:v1:key:config:cipher", 1, "127.0.0.1", 21001, "runtime-user-001", "runtime-password-0000000000000000", "pending", true, 0))
 	snapshot, err := lease.Snapshot(context.Background())
 	if err != nil || snapshot.ProxyID != 9 || snapshot.Status != "pending" {
 		t.Fatalf("unexpected snapshot: %+v %v", snapshot, err)
 	}
 
 	mock.ExpectExec("(?s)WITH changed AS \\(.*UPDATE proxy_runtimes.*status = 'starting'.*UPDATE proxies").
-		WithArgs(int64(42), `{"pending","stopped","error","degraded","blocked"}`).
+		WithArgs(int64(42), `{"pending","stopped","error","degraded","blocked","healthy","starting"}`).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	if err := lease.MarkStarting(context.Background()); err != nil {
 		t.Fatal(err)
@@ -77,7 +77,7 @@ func TestProxyRuntimeLifecycleRejectsInvalidTransitionsAndErrors(t *testing.T) {
 	if err := lease.MarkFailed(context.Background(), "SECRET OUTPUT", "safe", false); !errors.Is(err, ErrProxyRuntimeInvalid) {
 		t.Fatalf("invalid error code accepted: %v", err)
 	}
-	mock.ExpectExec("status = 'starting'").WithArgs(int64(7), `{"pending","stopped","error","degraded","blocked"}`).
+	mock.ExpectExec("status = 'starting'").WithArgs(int64(7), `{"pending","stopped","error","degraded","blocked","healthy","starting"}`).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	if err := lease.MarkStarting(context.Background()); !errors.Is(err, ErrProxyRuntimeStateConflict) {
 		t.Fatalf("stale transition accepted: %v", err)

@@ -94,6 +94,7 @@ type Config struct {
 	Update                  UpdateConfig                  `mapstructure:"update"`
 	Idempotency             IdempotencyConfig             `mapstructure:"idempotency"`
 	BatchImage              BatchImageConfig              `mapstructure:"batch_image"`
+	NativeProxyRuntime      NativeProxyRuntimeConfig      `mapstructure:"native_proxy_runtime"`
 }
 
 type LogConfig struct {
@@ -566,6 +567,19 @@ func normalizeWeChatConnectConfig(cfg *WeChatConnectConfig) {
 	if cfg.FrontendRedirectURL == "" {
 		cfg.FrontendRedirectURL = defaultWeChatConnectFrontendRedirect
 	}
+}
+
+// TokenRefreshConfig OAuth token自动刷新配置
+type NativeProxyRuntimeConfig struct {
+	Enabled             bool   `mapstructure:"enabled"`
+	BinaryPath          string `mapstructure:"binary_path"`
+	DataDir             string `mapstructure:"data_dir"`
+	ReadyTimeoutSeconds int    `mapstructure:"ready_timeout_seconds"`
+	ProbeIntervalMillis int    `mapstructure:"probe_interval_millis"`
+	StopTimeoutSeconds  int    `mapstructure:"stop_timeout_seconds"`
+	MaxRestarts         int    `mapstructure:"max_restarts"`
+	RestartBaseSeconds  int    `mapstructure:"restart_base_seconds"`
+	RestartMaxSeconds   int    `mapstructure:"restart_max_seconds"`
 }
 
 // TokenRefreshConfig OAuth token自动刷新配置
@@ -1633,6 +1647,16 @@ func setDefaults() {
 	viper.SetDefault("server.h2c.max_read_frame_size", 1<<20)              // 1MB（够用）
 	viper.SetDefault("server.h2c.max_upload_buffer_per_connection", 2<<20) // 2MB
 	viper.SetDefault("server.h2c.max_upload_buffer_per_stream", 512<<10)   // 512KB
+
+	viper.SetDefault("native_proxy_runtime.enabled", false)
+	viper.SetDefault("native_proxy_runtime.binary_path", "/usr/local/bin/sing-box")
+	viper.SetDefault("native_proxy_runtime.data_dir", "/app/data")
+	viper.SetDefault("native_proxy_runtime.ready_timeout_seconds", 20)
+	viper.SetDefault("native_proxy_runtime.probe_interval_millis", 100)
+	viper.SetDefault("native_proxy_runtime.stop_timeout_seconds", 5)
+	viper.SetDefault("native_proxy_runtime.max_restarts", 5)
+	viper.SetDefault("native_proxy_runtime.restart_base_seconds", 1)
+	viper.SetDefault("native_proxy_runtime.restart_max_seconds", 30)
 
 	// Log
 	viper.SetDefault("log.level", "info")

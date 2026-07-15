@@ -30,6 +30,8 @@ type ProxyRuntimeSnapshot struct {
 	EncryptionVersion         int16
 	ListenHost                string
 	ListenPort                int
+	ListenUsername            string
+	ListenPassword            string
 	Status                    string
 	AutoStart                 bool
 	RestartCount              int
@@ -50,6 +52,7 @@ func (r *ProxyRuntimeRepository) ListAutoStartRuntimeIDs(ctx context.Context, li
 	rows, err := r.db.QueryContext(ctx, `
 SELECT id FROM proxy_runtimes
 WHERE deleted_at IS NULL AND auto_start = TRUE
+  AND status IN ('pending', 'starting', 'healthy', 'degraded', 'blocked', 'error')
 ORDER BY id ASC LIMIT $1`, limit)
 	if err != nil {
 		return nil, fmt.Errorf("list native proxy runtimes for recovery: %w", err)
@@ -96,12 +99,15 @@ func (l *ProxyRuntimeLease) Snapshot(ctx context.Context) (*ProxyRuntimeSnapshot
 	}
 	var snapshot ProxyRuntimeSnapshot
 	err := l.conn.QueryRowContext(ctx, `
-SELECT id, proxy_id, normalized_config_encrypted, encryption_version,
-       listen_host, listen_port, status, auto_start, restart_count
-FROM proxy_runtimes
-WHERE id = $1 AND deleted_at IS NULL`, l.runtimeID).Scan(
+SELECT r.id, r.proxy_id, r.normalized_config_encrypted, r.encryption_version,
+       r.listen_host, r.listen_port, p.username, p.password,
+       r.status, r.auto_start, r.restart_count
+FROM proxy_runtimes r
+JOIN proxies p ON p.id = r.proxy_id AND p.deleted_at IS NULL
+WHERE r.id = $1 AND r.deleted_at IS NULL`, l.runtimeID).Scan(
 		&snapshot.ID, &snapshot.ProxyID, &snapshot.NormalizedConfigEncrypted,
 		&snapshot.EncryptionVersion, &snapshot.ListenHost, &snapshot.ListenPort,
+		&snapshot.ListenUsername, &snapshot.ListenPassword,
 		&snapshot.Status, &snapshot.AutoStart, &snapshot.RestartCount)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrProxyRuntimeNotFound
@@ -113,7 +119,7 @@ WHERE id = $1 AND deleted_at IS NULL`, l.runtimeID).Scan(
 }
 
 func (l *ProxyRuntimeLease) MarkStarting(ctx context.Context) error {
-	return l.transition(ctx, []string{"pending", "stopped", "error", "degraded", "blocked"}, `
+	return l.transition(ctx, []string{"pending", "stopped", "error", "degraded", "blocked", "healthy", "starting"}, `
 WITH changed AS (
     UPDATE proxy_runtimes
     SET status = 'starting', pid = NULL, config_path = NULL,
