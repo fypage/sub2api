@@ -87,6 +87,31 @@ export async function create(proxyData: CreateProxyRequest): Promise<Proxy> {
   return data
 }
 
+export interface NativeProxyPreview {
+  name: string
+  protocol: string
+  server_hint?: string
+  dependencies: number
+  fingerprint: string
+}
+
+export async function previewNative(input: string): Promise<NativeProxyPreview[]> {
+  const { data } = await apiClient.post<NativeProxyPreview[]>('/admin/proxies/native/preview', { input })
+  return data
+}
+
+export async function createNative(payload: {
+  name?: string
+  input: string
+  fingerprint: string
+  visibility: 'private' | 'public'
+  fallback_mode: 'none' | 'proxy' | 'direct'
+  backup_proxy_id?: number | null
+}): Promise<{ proxy_id: number; runtime_id: number; status: string }> {
+  const { data } = await apiClient.post<{ proxy_id: number; runtime_id: number; status: string }>('/admin/proxies/native', payload)
+  return data
+}
+
 /**
  * Update proxy
  * @param id - Proxy ID
@@ -261,6 +286,8 @@ export const proxiesAPI = {
   getAllWithCount,
   getById,
   create,
+  previewNative,
+  createNative,
   update,
   delete: deleteProxy,
   toggleStatus,

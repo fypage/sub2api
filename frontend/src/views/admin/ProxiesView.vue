@@ -393,6 +393,18 @@
           </button>
           <button
             type="button"
+            @click="createMode = 'native'"
+            :class="[
+              '-mb-px border-b-2 px-4 py-2 text-sm font-medium transition-colors',
+              createMode === 'native'
+                ? 'border-primary-500 text-primary-600 dark:text-primary-400'
+                : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
+            ]"
+          >
+            {{ t('admin.proxies.nativeAdd') }}
+          </button>
+          <button
+            type="button"
             @click="createMode = 'batch'"
             :class="[
               '-mb-px border-b-2 px-4 py-2 text-sm font-medium transition-colors',
@@ -530,6 +542,39 @@
 
       </form>
 
+      <!-- Native sing-box Add Form -->
+      <div v-else-if="createMode === 'native'" class="space-y-5">
+        <div>
+          <label class="input-label">{{ t('admin.proxies.nativeInput') }}</label>
+          <textarea v-model="nativeForm.input" rows="8" class="input font-mono text-sm" :placeholder="t('admin.proxies.nativeInputPlaceholder')"></textarea>
+        </div>
+        <button type="button" class="btn btn-secondary" :disabled="nativePreviewing || !nativeForm.input.trim()" @click="handleNativePreview">
+          {{ nativePreviewing ? t('admin.proxies.nativePreviewing') : t('admin.proxies.nativePreview') }}
+        </button>
+        <div v-if="nativeCandidates.length" class="space-y-2">
+          <label v-for="candidate in nativeCandidates" :key="candidate.fingerprint" class="flex cursor-pointer items-center gap-3 rounded-lg border p-3 dark:border-dark-600">
+            <input v-model="nativeForm.fingerprint" type="radio" :value="candidate.fingerprint" />
+            <span class="min-w-0"><strong>{{ candidate.name }}</strong><br><span class="text-xs text-gray-500">{{ candidate.protocol }} · {{ candidate.server_hint || '-' }}</span></span>
+          </label>
+        </div>
+        <div>
+          <label class="input-label">{{ t('admin.proxies.name') }}</label>
+          <input v-model="nativeForm.name" class="input" :placeholder="t('admin.proxies.nativeNameOptional')" />
+        </div>
+        <label class="flex items-center gap-2 text-sm"><input v-model="nativeForm.isPublic" type="checkbox" /> {{ t('admin.proxies.nativePublic') }}</label>
+        <div>
+          <label class="input-label">{{ t('admin.proxies.fallbackMode') }}</label>
+          <Select v-model="nativeForm.fallback_mode" :options="[
+            { label: t('admin.proxies.fallbackNone'), value: 'none' },
+            { label: t('admin.proxies.fallbackProxy'), value: 'proxy' },
+            { label: t('admin.proxies.fallbackDirect'), value: 'direct' },
+          ]" />
+        </div>
+        <div v-if="nativeForm.fallback_mode === 'proxy'">
+          <Select v-model="nativeForm.backup_proxy_id" :options="backupProxyOptions()" />
+        </div>
+      </div>
+
       <!-- Batch Add Form -->
       <div v-else class="space-y-5">
         <div>
@@ -621,6 +666,15 @@
                 d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
               ></path>
             </svg>
+            {{ submitting ? t('admin.proxies.creating') : t('common.create') }}
+          </button>
+          <button
+            v-else-if="createMode === 'native'"
+            @click="handleNativeCreate"
+            type="button"
+            :disabled="submitting || !nativeForm.fingerprint"
+            class="btn btn-primary"
+          >
             {{ submitting ? t('admin.proxies.creating') : t('common.create') }}
           </button>
           <button
@@ -969,6 +1023,7 @@ import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { adminAPI } from '@/api/admin'
 import type { Proxy, ProxyAccountSummary, ProxyProtocol, ProxyQualityCheckResult } from '@/types'
+import type { NativeProxyPreview } from '@/api/admin/proxies'
 import type { Column } from '@/components/common/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
@@ -1105,7 +1160,17 @@ const qualityReportProxy = ref<Proxy | null>(null)
 const qualityReport = ref<ProxyQualityCheckResult | null>(null)
 
 // Batch import state
-const createMode = ref<'standard' | 'batch'>('standard')
+const createMode = ref<'standard' | 'native' | 'batch'>('standard')
+const nativePreviewing = ref(false)
+const nativeCandidates = ref<NativeProxyPreview[]>([])
+const nativeForm = reactive({
+  name: '',
+  input: '',
+  fingerprint: '',
+  isPublic: false,
+  fallback_mode: 'none' as 'none' | 'proxy' | 'direct',
+  backup_proxy_id: null as number | null,
+})
 const batchInput = ref('')
 const batchParseResult = reactive({
   total: 0,
@@ -1262,6 +1327,13 @@ const closeCreateModal = () => {
   createForm.backup_proxy_id = null
   createForm.expiry_warn_days = 7
   createPasswordVisible.value = false
+  nativeForm.name = ''
+  nativeForm.input = ''
+  nativeForm.fingerprint = ''
+  nativeForm.isPublic = false
+  nativeForm.fallback_mode = 'none'
+  nativeForm.backup_proxy_id = null
+  nativeCandidates.value = []
   batchInput.value = ''
   batchParseResult.total = 0
   batchParseResult.valid = 0
@@ -1359,6 +1431,43 @@ const handleBatchCreate = async () => {
   } catch (error: any) {
     appStore.showError(error.response?.data?.detail || t('admin.proxies.failedToImport'))
     console.error('Error batch creating proxies:', error)
+  } finally {
+    submitting.value = false
+  }
+}
+
+const handleNativePreview = async () => {
+  nativePreviewing.value = true
+  try {
+    nativeCandidates.value = await adminAPI.proxies.previewNative(nativeForm.input)
+    nativeForm.fingerprint = nativeCandidates.value.length === 1 ? nativeCandidates.value[0].fingerprint : ''
+  } catch (error: any) {
+    nativeCandidates.value = []
+    nativeForm.fingerprint = ''
+    appStore.showError(error.response?.data?.detail || t('admin.proxies.nativePreviewFailed'))
+  } finally {
+    nativePreviewing.value = false
+  }
+}
+
+const handleNativeCreate = async () => {
+  if (!nativeForm.fingerprint) return
+  submitting.value = true
+  try {
+    const result = await adminAPI.proxies.createNative({
+      name: nativeForm.name.trim() || undefined,
+      input: nativeForm.input,
+      fingerprint: nativeForm.fingerprint,
+      visibility: nativeForm.isPublic ? 'public' : 'private',
+      fallback_mode: nativeForm.fallback_mode,
+      backup_proxy_id: nativeForm.fallback_mode === 'proxy' ? nativeForm.backup_proxy_id : null,
+    })
+    if (result.status === 'healthy') appStore.showSuccess(t('admin.proxies.nativeCreated'))
+    else appStore.showInfo(t('admin.proxies.nativeCreatedWithError'))
+    closeCreateModal()
+    loadProxies()
+  } catch (error: any) {
+    appStore.showError(error.response?.data?.detail || t('admin.proxies.failedToCreate'))
   } finally {
     submitting.value = false
   }
