@@ -31,6 +31,32 @@ func BuildJSONRuntimeConfig(candidate JSONCandidate, listener RuntimeListener) (
 
 // BuildCanonicalRuntimeConfig reconstructs a validated runtime configuration
 // from the canonical encrypted node chain persisted by the import workflow.
+func EncodeCanonicalCandidate(candidate JSONCandidate) ([]byte, error) {
+	if len(candidate.Materials) == 0 || len(candidate.Materials) > maxJSONNodes {
+		return nil, fmt.Errorf("%w: missing canonical materials", ErrInvalidInput)
+	}
+	objects := make([]map[string]any, len(candidate.Materials))
+	for index, material := range candidate.Materials {
+		decoder := json.NewDecoder(bytes.NewReader(material.Raw))
+		decoder.UseNumber()
+		if err := decoder.Decode(&objects[index]); err != nil {
+			return nil, fmt.Errorf("%w: invalid canonical material", ErrInvalidInput)
+		}
+		delete(objects[index], "tag")
+		objects[index]["@kind"] = material.Kind
+		if index+1 < len(objects) {
+			objects[index]["detour"] = fmt.Sprintf("@dependency:%d", index+1)
+		} else {
+			delete(objects[index], "detour")
+		}
+	}
+	encoded, err := json.Marshal(objects)
+	if err != nil {
+		return nil, fmt.Errorf("encode canonical candidate: %w", err)
+	}
+	return encoded, nil
+}
+
 func BuildCanonicalRuntimeConfig(canonical []byte, listener RuntimeListener) ([]byte, error) {
 	canonical = bytes.TrimSpace(canonical)
 	if len(canonical) == 0 || len(canonical) > maxSingBoxJSONBytes {
