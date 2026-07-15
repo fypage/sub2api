@@ -84,6 +84,20 @@ func (h *ProxyRuntimeHandler) Create(c *gin.Context) {
 	})
 }
 
+func (h *ProxyRuntimeHandler) Status(c *gin.Context) {
+	proxyID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || proxyID <= 0 {
+		response.BadRequest(c, "Invalid proxy ID")
+		return
+	}
+	status, err := h.admin.Status(c.Request.Context(), proxyID)
+	if err != nil {
+		response.ErrorFrom(c, infraerrors.BadRequest("NATIVE_PROXY_STATUS_UNAVAILABLE", "native proxy runtime status unavailable"))
+		return
+	}
+	response.Success(c, status)
+}
+
 func (h *ProxyRuntimeHandler) Start(c *gin.Context) {
 	h.control(c, true)
 }

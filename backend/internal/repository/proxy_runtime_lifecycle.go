@@ -23,6 +23,18 @@ const maxRuntimeErrorText = 500
 
 var runtimeErrorCodePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_.-]{0,63}$`)
 
+type ProxyRuntimeStatus struct {
+	ID                int64  `json:"id"`
+	ProxyID           int64  `json:"proxy_id"`
+	Status            string `json:"status"`
+	AutoStart         bool   `json:"auto_start"`
+	RestartCount      int    `json:"restart_count"`
+	LastErrorCode     string `json:"last_error_code,omitempty"`
+	LastErrorRedacted string `json:"last_error_redacted,omitempty"`
+	ListenHost        string `json:"listen_host"`
+	ListenPort        int    `json:"listen_port"`
+}
+
 type ProxyRuntimeSnapshot struct {
 	ID                        int64
 	ProxyID                   int64
@@ -40,6 +52,29 @@ type ProxyRuntimeSnapshot struct {
 type ProxyRuntimeLease struct {
 	conn      *sql.Conn
 	runtimeID int64
+}
+
+func (r *ProxyRuntimeRepository) GetRuntimeStatusByProxyID(ctx context.Context, proxyID int64) (*ProxyRuntimeStatus, error) {
+	if r == nil || r.db == nil || proxyID <= 0 {
+		return nil, ErrProxyRuntimeInvalid
+	}
+	var status ProxyRuntimeStatus
+	err := r.db.QueryRowContext(ctx, `
+SELECT id, proxy_id, status, auto_start, restart_count,
+       COALESCE(last_error_code, ''), COALESCE(last_error_redacted, ''),
+       listen_host, listen_port
+FROM proxy_runtimes
+WHERE proxy_id = $1 AND deleted_at IS NULL`, proxyID).Scan(
+		&status.ID, &status.ProxyID, &status.Status, &status.AutoStart,
+		&status.RestartCount, &status.LastErrorCode, &status.LastErrorRedacted,
+		&status.ListenHost, &status.ListenPort)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrProxyRuntimeNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("load native proxy runtime status: %w", err)
+	}
+	return &status, nil
 }
 
 func (r *ProxyRuntimeRepository) ListAutoStartRuntimeIDs(ctx context.Context, limit int) ([]int64, error) {

@@ -426,6 +426,7 @@ func registerProxyRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		proxies.POST("/batch", h.Admin.Proxy.BatchCreate)
 		proxies.POST("/native/preview", h.Admin.ProxyRuntime.Preview)
 		proxies.POST("/native", h.Admin.ProxyRuntime.Create)
+		proxies.GET("/:id/native", h.Admin.ProxyRuntime.Status)
 		proxies.POST("/native/:id/start", h.Admin.ProxyRuntime.Start)
 		proxies.POST("/native/:id/stop", h.Admin.ProxyRuntime.Stop)
 	}

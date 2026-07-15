@@ -41,6 +41,22 @@ func (a *ProxyRuntimeAdmin) Preview(input string) ([]service.ProxyRuntimePreview
 	return previews, nil
 }
 
+func (a *ProxyRuntimeAdmin) Status(ctx context.Context, proxyID int64) (*service.ProxyRuntimeStatus, error) {
+	if a == nil || a.repository == nil || a.manager == nil || !a.manager.enabled {
+		return nil, ErrProxyRuntimeInvalid
+	}
+	status, err := a.repository.GetRuntimeStatusByProxyID(ctx, proxyID)
+	if err != nil {
+		return nil, err
+	}
+	return &service.ProxyRuntimeStatus{
+		ID: status.ID, ProxyID: status.ProxyID, Status: status.Status,
+		AutoStart: status.AutoStart, RestartCount: status.RestartCount,
+		LastErrorCode: status.LastErrorCode, LastErrorRedacted: status.LastErrorRedacted,
+		ListenHost: status.ListenHost, ListenPort: status.ListenPort,
+	}, nil
+}
+
 func (a *ProxyRuntimeAdmin) Start(ctx context.Context, runtimeID int64) error {
 	if a == nil || a.manager == nil {
 		return ErrProxyRuntimeInvalid

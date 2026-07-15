@@ -25,6 +25,18 @@ type ProxyRuntimeCreateRequest struct {
 	BackupProxyID *int64
 }
 
+type ProxyRuntimeStatus struct {
+	ID                int64  `json:"id"`
+	ProxyID           int64  `json:"proxy_id"`
+	Status            string `json:"status"`
+	AutoStart         bool   `json:"auto_start"`
+	RestartCount      int    `json:"restart_count"`
+	LastErrorCode     string `json:"last_error_code,omitempty"`
+	LastErrorRedacted string `json:"last_error_redacted,omitempty"`
+	ListenHost        string `json:"listen_host"`
+	ListenPort        int    `json:"listen_port"`
+}
+
 type ProxyRuntimeCreated struct {
 	ProxyID   int64
 	RuntimeID int64
@@ -32,6 +44,7 @@ type ProxyRuntimeCreated struct {
 
 type ProxyRuntimeAdminService interface {
 	Preview(input string) ([]ProxyRuntimePreview, error)
+	Status(ctx context.Context, proxyID int64) (*ProxyRuntimeStatus, error)
 	Create(ctx context.Context, request ProxyRuntimeCreateRequest) (*ProxyRuntimeCreated, error)
 	Start(ctx context.Context, runtimeID int64) error
 	Stop(ctx context.Context, runtimeID int64) error

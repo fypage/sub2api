@@ -100,6 +100,31 @@ export async function previewNative(input: string): Promise<NativeProxyPreview[]
   return data
 }
 
+export interface NativeProxyStatus {
+  id: number
+  proxy_id: number
+  status: string
+  auto_start: boolean
+  restart_count: number
+  last_error_code?: string
+  last_error_redacted?: string
+  listen_host: string
+  listen_port: number
+}
+
+export async function getNativeStatus(proxyId: number): Promise<NativeProxyStatus> {
+  const { data } = await apiClient.get<NativeProxyStatus>(`/admin/proxies/${proxyId}/native`)
+  return data
+}
+
+export async function startNative(runtimeId: number): Promise<void> {
+  await apiClient.post(`/admin/proxies/native/${runtimeId}/start`)
+}
+
+export async function stopNative(runtimeId: number): Promise<void> {
+  await apiClient.post(`/admin/proxies/native/${runtimeId}/stop`)
+}
+
 export async function createNative(payload: {
   name?: string
   input: string
@@ -288,6 +313,9 @@ export const proxiesAPI = {
   create,
   previewNative,
   createNative,
+  getNativeStatus,
+  startNative,
+  stopNative,
   update,
   delete: deleteProxy,
   toggleStatus,
