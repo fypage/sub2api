@@ -637,6 +637,43 @@ func TestAdminService_DeleteGroup_Error(t *testing.T) {
 	require.ErrorIs(t, err, deleteErr)
 }
 
+type proxyRuntimeControllerStub struct {
+	status    *ProxyRuntimeStatus
+	statusErr error
+	stopErr   error
+	stopped   []int64
+}
+
+func (s *proxyRuntimeControllerStub) Status(context.Context, int64) (*ProxyRuntimeStatus, error) {
+	return s.status, s.statusErr
+}
+
+func (s *proxyRuntimeControllerStub) Stop(_ context.Context, runtimeID int64) error {
+	s.stopped = append(s.stopped, runtimeID)
+	return s.stopErr
+}
+
+func TestAdminService_DeleteProxy_StopsNativeRuntimeFirst(t *testing.T) {
+	repo := &proxyRepoStub{}
+	controller := &proxyRuntimeControllerStub{status: &ProxyRuntimeStatus{ID: 91, ProxyID: 7, Status: "healthy"}}
+	svc := &adminServiceImpl{proxyRepo: repo, proxyRuntime: controller}
+
+	err := svc.DeleteProxy(context.Background(), 7)
+	require.NoError(t, err)
+	require.Equal(t, []int64{91}, controller.stopped)
+	require.Equal(t, []int64{7}, repo.deletedIDs)
+}
+
+func TestAdminService_DeleteProxy_AbortWhenRuntimeStopFails(t *testing.T) {
+	repo := &proxyRepoStub{}
+	controller := &proxyRuntimeControllerStub{status: &ProxyRuntimeStatus{ID: 91, ProxyID: 7, Status: "healthy"}, stopErr: errors.New("stop failed")}
+	svc := &adminServiceImpl{proxyRepo: repo, proxyRuntime: controller}
+
+	err := svc.DeleteProxy(context.Background(), 7)
+	require.Error(t, err)
+	require.Empty(t, repo.deletedIDs)
+}
+
 func TestAdminService_DeleteProxy_Success(t *testing.T) {
 	repo := &proxyRepoStub{}
 	svc := &adminServiceImpl{proxyRepo: repo}

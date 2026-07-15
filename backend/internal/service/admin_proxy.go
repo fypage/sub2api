@@ -154,7 +154,28 @@ func (s *adminServiceImpl) DeleteProxy(ctx context.Context, id int64) error {
 	if count > 0 {
 		return ErrProxyInUse
 	}
+	if err := s.stopNativeProxyRuntime(ctx, id); err != nil {
+		return err
+	}
 	return s.proxyRepo.Delete(ctx, id)
+}
+
+func (s *adminServiceImpl) stopNativeProxyRuntime(ctx context.Context, proxyID int64) error {
+	if s.proxyRuntime == nil {
+		return nil
+	}
+	status, err := s.proxyRuntime.Status(ctx, proxyID)
+	if err != nil {
+		// Static proxies have no runtime status and require no lifecycle action.
+		return nil
+	}
+	if status == nil || status.ID <= 0 || status.Status == "stopped" {
+		return nil
+	}
+	if err := s.proxyRuntime.Stop(ctx, status.ID); err != nil {
+		return fmt.Errorf("stop native proxy runtime before deletion: %w", err)
+	}
+	return nil
 }
 
 func (s *adminServiceImpl) BatchDeleteProxies(ctx context.Context, ids []int64) (*ProxyBatchDeleteResult, error) {
@@ -177,6 +198,10 @@ func (s *adminServiceImpl) BatchDeleteProxies(ctx context.Context, ids []int64) 
 				ID:     id,
 				Reason: ErrProxyInUse.Error(),
 			})
+			continue
+		}
+		if err := s.stopNativeProxyRuntime(ctx, id); err != nil {
+			result.Skipped = append(result.Skipped, ProxyBatchDeleteSkipped{ID: id, Reason: "native runtime stop failed"})
 			continue
 		}
 		if err := s.proxyRepo.Delete(ctx, id); err != nil {

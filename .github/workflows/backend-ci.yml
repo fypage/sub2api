@@ -57,6 +57,17 @@ jobs:
       - name: Frontend typecheck and critical vitest
         run: make test-frontend
 
+  runtime-image:
+    if: github.ref == 'refs/heads/feat/native-singbox-runtime'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Build pinned runtime stage
+        run: docker build --target sing-box-runtime -t sub2api-sing-box-ci:${{ github.sha }} .
+      - name: Verify pinned sing-box
+        run: |
+          docker run --rm sub2api-sing-box-ci:${{ github.sha }} /usr/local/bin/sing-box version | grep -q 'sing-box version 1.13.14'
+
   golangci-lint:
     runs-on: ubuntu-latest
     steps:

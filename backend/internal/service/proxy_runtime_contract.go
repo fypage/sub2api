@@ -42,6 +42,11 @@ type ProxyRuntimeCreated struct {
 	RuntimeID int64
 }
 
+type ProxyRuntimeController interface {
+	Status(ctx context.Context, proxyID int64) (*ProxyRuntimeStatus, error)
+	Stop(ctx context.Context, runtimeID int64) error
+}
+
 type ProxyRuntimeAdminService interface {
 	Preview(input string) ([]ProxyRuntimePreview, error)
 	Status(ctx context.Context, proxyID int64) (*ProxyRuntimeStatus, error)
