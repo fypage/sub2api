@@ -543,6 +543,14 @@ var proxyQualityTargets = []proxyQualityTarget{
 		},
 	},
 	{
+		Target: "chatgpt_backend",
+		URL:    "https://chatgpt.com/backend-api/models",
+		Method: http.MethodGet,
+		AllowedStatuses: map[int]struct{}{
+			http.StatusUnauthorized: {},
+		},
+	},
+	{
 		Target: "anthropic",
 		URL:    "https://api.anthropic.com/v1/messages",
 		Method: http.MethodGet,

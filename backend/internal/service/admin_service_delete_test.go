@@ -641,6 +641,7 @@ type proxyRuntimeControllerStub struct {
 	status    *ProxyRuntimeStatus
 	statusErr error
 	stopErr   error
+	recordErr error
 	stopped   []int64
 }
 
@@ -651,6 +652,10 @@ func (s *proxyRuntimeControllerStub) Status(context.Context, int64) (*ProxyRunti
 func (s *proxyRuntimeControllerStub) Stop(_ context.Context, runtimeID int64) error {
 	s.stopped = append(s.stopped, runtimeID)
 	return s.stopErr
+}
+
+func (s *proxyRuntimeControllerStub) RecordQuality(context.Context, int64, ProxyRuntimeQualitySnapshot) error {
+	return s.recordErr
 }
 
 func TestAdminService_DeleteProxy_StopsNativeRuntimeFirst(t *testing.T) {

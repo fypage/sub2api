@@ -532,6 +532,30 @@ func (s *adminServiceImpl) saveProxyQualitySnapshot(ctx context.Context, proxyID
 		info.City = exitInfo.City
 	}
 	s.saveProxyLatency(ctx, proxyID, info)
+	if s.proxyRuntime != nil {
+		status, code, text := nativeRuntimeQualityClassification(result)
+		if err := s.proxyRuntime.RecordQuality(ctx, proxyID, ProxyRuntimeQualitySnapshot{
+			Status: status, Score: result.Score, ExitIP: result.ExitIP,
+			CountryCode: result.CountryCode, ErrorCode: code, ErrorText: text,
+		}); err != nil {
+			logger.LegacyPrintf("service.admin", "Warning: persist native proxy runtime quality failed: %v", err)
+		}
+	}
+}
+
+func nativeRuntimeQualityClassification(result *ProxyQualityCheckResult) (status, code, text string) {
+	if result == nil {
+		return "degraded", "quality_failed", "quality check failed"
+	}
+	for _, item := range result.Items {
+		if item.Target == "chatgpt_backend" && (item.Status == "challenge" || item.Status == "fail") {
+			return "blocked", "chatgpt_backend_blocked", "ChatGPT backend is blocked on this exit"
+		}
+	}
+	if result.ChallengeCount > 0 || result.FailedCount > 0 {
+		return "degraded", "quality_degraded", "one or more quality targets failed"
+	}
+	return "healthy", "", ""
 }
 
 func (s *adminServiceImpl) probeProxyLatency(ctx context.Context, proxy *Proxy) {

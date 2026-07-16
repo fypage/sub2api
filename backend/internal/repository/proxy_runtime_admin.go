@@ -57,6 +57,13 @@ func (a *ProxyRuntimeAdmin) Status(ctx context.Context, proxyID int64) (*service
 	}, nil
 }
 
+func (a *ProxyRuntimeAdmin) RecordQuality(ctx context.Context, proxyID int64, snapshot service.ProxyRuntimeQualitySnapshot) error {
+	if a == nil || a.repository == nil {
+		return ErrProxyRuntimeInvalid
+	}
+	return a.repository.UpdateQualityByProxyID(ctx, proxyID, snapshot)
+}
+
 func (a *ProxyRuntimeAdmin) Start(ctx context.Context, runtimeID int64) error {
 	if a == nil || a.manager == nil {
 		return ErrProxyRuntimeInvalid
