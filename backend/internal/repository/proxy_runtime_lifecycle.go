@@ -168,6 +168,22 @@ UPDATE proxies p SET status = 'disabled', updated_at = NOW()
 FROM changed WHERE p.id = changed.proxy_id`, nil)
 }
 
+func (l *ProxyRuntimeLease) MarkProcessReady(ctx context.Context, pid int64, configPath string) error {
+	if pid <= 0 || !filepath.IsAbs(configPath) || len(configPath) > 4096 {
+		return ErrProxyRuntimeInvalid
+	}
+	return l.transition(ctx, []string{"starting"}, `
+WITH changed AS (
+    UPDATE proxy_runtimes
+    SET pid = $3, config_path = $4, updated_at = NOW()
+    WHERE proxy_runtimes.id = $1 AND proxy_runtimes.deleted_at IS NULL AND status = ANY($2)
+      AND EXISTS (SELECT 1 FROM proxies p WHERE p.id = proxy_runtimes.proxy_id AND p.deleted_at IS NULL)
+    RETURNING proxy_id
+)
+UPDATE proxies p SET status = 'disabled', updated_at = NOW()
+FROM changed WHERE p.id = changed.proxy_id`, []any{pid, configPath})
+}
+
 func (l *ProxyRuntimeLease) MarkHealthy(ctx context.Context, pid int64, configPath string) error {
 	if pid <= 0 || !filepath.IsAbs(configPath) || len(configPath) > 4096 {
 		return ErrProxyRuntimeInvalid

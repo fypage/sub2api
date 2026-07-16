@@ -5,12 +5,15 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
+	"strconv"
 	"sync"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/proxyimport"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/proxyruntime"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/runtimecrypto"
+	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
 var (
@@ -39,6 +42,8 @@ type managedProxyRuntime struct {
 	process    runtimeProcess
 	configPath string
 	processCfg proxyruntime.ProcessConfig
+	proxyID    int64
+	proxyURL   string
 	stopping   bool
 	mu         sync.Mutex
 }
@@ -50,6 +55,7 @@ type ProxyRuntimeManager struct {
 	store         proxyruntime.ConfigStore
 	starter       runtimeProcessStarter
 	policy        proxyruntime.RestartPolicy
+	qualityGate   RuntimeQualityGate
 	binaryPath    string
 	readyTimeout  time.Duration
 	probeInterval time.Duration
@@ -62,6 +68,19 @@ type ProxyRuntimeManager struct {
 	wg     sync.WaitGroup
 }
 
+type RuntimeQualityResult struct {
+	Status      string
+	Score       int
+	ExitIP      string
+	CountryCode string
+	ErrorCode   string
+	ErrorText   string
+}
+
+type RuntimeQualityGate interface {
+	Check(ctx context.Context, proxyURL string) (RuntimeQualityResult, error)
+}
+
 type ProxyRuntimeManagerOptions struct {
 	Enabled       bool
 	BinaryPath    string
@@ -72,8 +91,8 @@ type ProxyRuntimeManagerOptions struct {
 	RestartPolicy proxyruntime.RestartPolicy
 }
 
-func NewProxyRuntimeManager(repo *ProxyRuntimeRepository, keyring *runtimecrypto.Keyring, options ProxyRuntimeManagerOptions) (*ProxyRuntimeManager, error) {
-	if repo == nil || keyring == nil {
+func NewProxyRuntimeManager(repo *ProxyRuntimeRepository, keyring *runtimecrypto.Keyring, qualityGate RuntimeQualityGate, options ProxyRuntimeManagerOptions) (*ProxyRuntimeManager, error) {
+	if repo == nil || keyring == nil || qualityGate == nil {
 		return nil, fmt.Errorf("proxy runtime repository and keyring are required")
 	}
 	checker := proxyruntime.SingBoxChecker{BinaryPath: options.BinaryPath}
@@ -93,7 +112,7 @@ func NewProxyRuntimeManager(repo *ProxyRuntimeRepository, keyring *runtimecrypto
 	return &ProxyRuntimeManager{
 		enabled: options.Enabled, repository: repo, keyring: keyring,
 		store:   proxyruntime.ConfigStore{DataDir: options.DataDir, Checker: checker},
-		starter: nativeProcessStarter{}, policy: options.RestartPolicy,
+		starter: nativeProcessStarter{}, policy: options.RestartPolicy, qualityGate: qualityGate,
 		binaryPath: options.BinaryPath, readyTimeout: options.ReadyTimeout,
 		probeInterval: options.ProbeInterval, stopTimeout: options.StopTimeout,
 		ctx: ctx, cancel: cancel, items: make(map[int64]*managedProxyRuntime),
@@ -195,13 +214,31 @@ func (m *ProxyRuntimeManager) startWithLease(ctx context.Context, lease *ProxyRu
 	if err != nil {
 		return nil, err
 	}
-	if err := lease.MarkHealthy(ctx, process.PID(), configPath); err != nil {
+	if err := lease.MarkProcessReady(ctx, process.PID(), configPath); err != nil {
 		stopCtx, cancel := context.WithTimeout(context.Background(), processCfg.StopTimeout+time.Second)
 		_ = process.Stop(stopCtx)
 		cancel()
 		return nil, err
 	}
-	return &managedProxyRuntime{lease: lease, process: process, configPath: configPath, processCfg: processCfg}, nil
+	proxyURL := fmt.Sprintf("socks5h://%s:%s@%s", snapshot.ListenUsername, snapshot.ListenPassword,
+		net.JoinHostPort(snapshot.ListenHost, strconv.Itoa(snapshot.ListenPort)))
+	quality, err := m.qualityGate.Check(ctx, proxyURL)
+	if err != nil {
+		stopCtx, cancel := context.WithTimeout(context.Background(), processCfg.StopTimeout+time.Second)
+		_ = process.Stop(stopCtx)
+		cancel()
+		return nil, fmt.Errorf("native proxy quality gate failed: %w", err)
+	}
+	if err := m.repository.UpdateQualityByProxyID(ctx, snapshot.ProxyID, service.ProxyRuntimeQualitySnapshot{
+		Status: quality.Status, Score: quality.Score, ExitIP: quality.ExitIP,
+		CountryCode: quality.CountryCode, ErrorCode: quality.ErrorCode, ErrorText: quality.ErrorText,
+	}); err != nil {
+		stopCtx, cancel := context.WithTimeout(context.Background(), processCfg.StopTimeout+time.Second)
+		_ = process.Stop(stopCtx)
+		cancel()
+		return nil, err
+	}
+	return &managedProxyRuntime{lease: lease, process: process, configPath: configPath, processCfg: processCfg, proxyID: snapshot.ProxyID, proxyURL: proxyURL}, nil
 }
 
 func (m *ProxyRuntimeManager) supervise(runtimeID int64, item *managedProxyRuntime) {
@@ -238,10 +275,24 @@ func (m *ProxyRuntimeManager) supervise(runtimeID int64, item *managedProxyRunti
 			_ = item.lease.MarkFailed(context.Background(), runtimeFailureCode(err), stableRuntimeError(err), true)
 			continue
 		}
-		if err := item.lease.MarkHealthy(m.ctx, process.PID(), item.configPath); err != nil {
+		if err := item.lease.MarkProcessReady(m.ctx, process.PID(), item.configPath); err != nil {
 			stopCtx, cancel := context.WithTimeout(context.Background(), item.processCfg.StopTimeout+time.Second)
 			_ = process.Stop(stopCtx)
 			cancel()
+			m.remove(runtimeID, item, true)
+			return
+		}
+		quality, err := m.qualityGate.Check(m.ctx, item.proxyURL)
+		if err != nil {
+			_ = item.lease.MarkFailed(context.Background(), "quality_gate_failed", "native proxy quality gate failed", true)
+			_ = process.Stop(context.Background())
+			continue
+		}
+		if err := m.repository.UpdateQualityByProxyID(m.ctx, item.proxyID, service.ProxyRuntimeQualitySnapshot{
+			Status: quality.Status, Score: quality.Score, ExitIP: quality.ExitIP,
+			CountryCode: quality.CountryCode, ErrorCode: quality.ErrorCode, ErrorText: quality.ErrorText,
+		}); err != nil {
+			_ = process.Stop(context.Background())
 			m.remove(runtimeID, item, true)
 			return
 		}

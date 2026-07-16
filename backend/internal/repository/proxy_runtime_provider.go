@@ -11,7 +11,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/proxyruntime"
 )
 
-func ProvideProxyRuntimeManager(cfg *config.Config, client *ent.Client, repo *ProxyRuntimeRepository) (*ProxyRuntimeManager, error) {
+func ProvideProxyRuntimeManager(cfg *config.Config, client *ent.Client, repo *ProxyRuntimeRepository, qualityGate RuntimeQualityGate) (*ProxyRuntimeManager, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("nil config")
 	}
@@ -44,7 +44,7 @@ func ProvideProxyRuntimeManager(cfg *config.Config, client *ent.Client, repo *Pr
 			MaxDelay:    time.Duration(cfg.NativeProxyRuntime.RestartMaxSeconds) * time.Second,
 		},
 	}
-	manager, err := NewProxyRuntimeManager(repo, keyring, options)
+	manager, err := NewProxyRuntimeManager(repo, keyring, qualityGate, options)
 	if err != nil {
 		return nil, err
 	}

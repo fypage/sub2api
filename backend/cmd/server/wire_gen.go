@@ -52,7 +52,9 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	groupRepository := repository.NewGroupRepository(client, db)
 	proxyRepository := repository.NewProxyRepository(client, db)
 	proxyRuntimeRepository := repository.NewProxyRuntimeRepository(db)
-	proxyRuntimeManager, err := repository.ProvideProxyRuntimeManager(configConfig, client, proxyRuntimeRepository)
+	proxyExitInfoProber := repository.NewProxyExitInfoProber(configConfig)
+	runtimeQualityGate := repository.NewRuntimeQualityGate(proxyExitInfoProber)
+	proxyRuntimeManager, err := repository.ProvideProxyRuntimeManager(configConfig, client, proxyRuntimeRepository, runtimeQualityGate)
 	if err != nil {
 		return nil, err
 	}
@@ -190,7 +192,6 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	leaderLockCache := repository.NewLeaderLockCache(redisClient)
 	dashboardAggregationService := service.ProvideDashboardAggregationService(dashboardAggregationRepository, timingWheelService, leaderLockCache, db, configConfig)
 	dashboardHandler := admin.NewDashboardHandler(dashboardService, dashboardAggregationService)
-	proxyExitInfoProber := repository.NewProxyExitInfoProber(configConfig)
 	proxyLatencyCache := repository.NewProxyLatencyCache(redisClient)
 	adminService := service.NewAdminService(userRepository, groupRepository, accountRepository, proxyRepository, apiKeyRepository, redeemCodeRepository, userGroupRateRepository, userRPMCache, billingCacheService, proxyExitInfoProber, proxyLatencyCache, apiKeyAuthCacheInvalidator, client, settingService, subscriptionService, userSubscriptionRepository, privacyClientFactory, openAIGatewayService, proxyRuntimeAdmin)
 	adminUserHandler := admin.NewUserHandler(adminService, concurrencyService, serviceUserPlatformQuotaRepository, billingCache)
