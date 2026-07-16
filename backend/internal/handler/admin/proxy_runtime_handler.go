@@ -24,6 +24,14 @@ type proxyRuntimePreviewRequest struct {
 	Input string `json:"input" binding:"required"`
 }
 
+type proxyRuntimeBatchCreateRequest struct {
+	Input         string   `json:"input" binding:"required"`
+	Fingerprints  []string `json:"fingerprints" binding:"required,min=1,max=100,dive,len=64,hexadecimal"`
+	Visibility    string   `json:"visibility" binding:"required,oneof=private public"`
+	FallbackMode  string   `json:"fallback_mode" binding:"omitempty,oneof=none proxy direct"`
+	BackupProxyID *int64   `json:"backup_proxy_id"`
+}
+
 type proxyRuntimeCreateRequest struct {
 	Name          string `json:"name"`
 	Input         string `json:"input" binding:"required"`
@@ -96,6 +104,29 @@ func (h *ProxyRuntimeHandler) Status(c *gin.Context) {
 		return
 	}
 	response.Success(c, status)
+}
+
+func (h *ProxyRuntimeHandler) CreateBatch(c *gin.Context) {
+	var request proxyRuntimeBatchCreateRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		response.BadRequest(c, "Invalid request")
+		return
+	}
+	subject, ok := middleware.GetAuthSubjectFromContext(c)
+	if !ok || subject.UserID <= 0 || h == nil || h.admin == nil {
+		response.ErrorFrom(c, infraerrors.Unauthorized("ADMIN_IDENTITY_REQUIRED", "administrator identity is required"))
+		return
+	}
+	ownerID := subject.UserID
+	items, err := h.admin.CreateBatch(c.Request.Context(), service.ProxyRuntimeBatchCreateRequest{
+		OwnerUserID: &ownerID, Input: request.Input, Fingerprints: request.Fingerprints,
+		Visibility: request.Visibility, FallbackMode: request.FallbackMode, BackupProxyID: request.BackupProxyID,
+	})
+	if err != nil {
+		response.ErrorFrom(c, infraerrors.BadRequest("NATIVE_PROXY_BATCH_CREATE_FAILED", "native proxy batch creation failed"))
+		return
+	}
+	response.Success(c, items)
 }
 
 func (h *ProxyRuntimeHandler) Start(c *gin.Context) {

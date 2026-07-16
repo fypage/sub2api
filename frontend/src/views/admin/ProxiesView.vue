@@ -1320,7 +1320,7 @@ const handleNativeControl = async (proxy: Proxy) => {
   if (!runtime || nativeControlLoading.has(proxy.id)) return
   nativeControlLoading.add(proxy.id)
   try {
-    if (runtime.status === 'stopped' || runtime.status === 'error' || runtime.status === 'blocked' || runtime.status === 'degraded') {
+    if (runtime.status === 'stopped' || runtime.status === 'error') {
       await adminAPI.proxies.startNative(runtime.id)
     } else {
       await adminAPI.proxies.stopNative(runtime.id)
