@@ -19,6 +19,7 @@ func TestNativeRuntimeQualityClassificationSeparatesGenericFailure(t *testing.T)
 	status, code, text := nativeRuntimeQualityClassification(result)
 	require.Equal(t, "degraded", status)
 	require.Equal(t, "quality_degraded", code)
+	require.NotEmpty(t, text)
 
 	result = &ProxyQualityCheckResult{Score: 100, PassedCount: 4}
 	status, code, text = nativeRuntimeQualityClassification(result)
