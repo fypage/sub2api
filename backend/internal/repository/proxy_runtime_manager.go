@@ -252,6 +252,10 @@ func (m *ProxyRuntimeManager) supervise(runtimeID int64, item *managedProxyRunti
 }
 
 func (m *ProxyRuntimeManager) Stop(ctx context.Context, runtimeID int64) error {
+	return m.stop(ctx, runtimeID, false)
+}
+
+func (m *ProxyRuntimeManager) stop(ctx context.Context, runtimeID int64, autoStart bool) error {
 	m.mu.Lock()
 	item, exists := m.items[runtimeID]
 	m.mu.Unlock()
@@ -263,7 +267,7 @@ func (m *ProxyRuntimeManager) Stop(ctx context.Context, runtimeID int64) error {
 	process := item.process
 	item.mu.Unlock()
 	err := process.Stop(ctx)
-	stateErr := item.lease.MarkStopped(context.Background())
+	stateErr := item.lease.MarkStopped(context.Background(), autoStart)
 	m.remove(runtimeID, item, true)
 	if err != nil && !errors.Is(err, proxyruntime.ErrProcessStopTimeout) {
 		return err
@@ -286,7 +290,7 @@ func (m *ProxyRuntimeManager) StopAll(ctx context.Context) error {
 	m.mu.Unlock()
 	var firstErr error
 	for _, id := range ids {
-		if err := m.Stop(ctx, id); err != nil && !errors.Is(err, ErrProxyRuntimeNotFound) && firstErr == nil {
+		if err := m.stop(ctx, id, true); err != nil && !errors.Is(err, ErrProxyRuntimeNotFound) && firstErr == nil {
 			firstErr = err
 		}
 	}

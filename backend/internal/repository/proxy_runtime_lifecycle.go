@@ -87,7 +87,7 @@ func (r *ProxyRuntimeRepository) ListAutoStartRuntimeIDs(ctx context.Context, li
 	rows, err := r.db.QueryContext(ctx, `
 SELECT id FROM proxy_runtimes
 WHERE deleted_at IS NULL AND auto_start = TRUE
-  AND status IN ('pending', 'starting', 'healthy', 'degraded', 'blocked', 'error')
+  AND status IN ('pending', 'starting', 'healthy', 'degraded', 'blocked', 'error', 'stopped')
 ORDER BY id ASC LIMIT $1`, limit)
 	if err != nil {
 		return nil, fmt.Errorf("list native proxy runtimes for recovery: %w", err)
@@ -209,17 +209,18 @@ UPDATE proxies p SET status = 'disabled', updated_at = NOW()
 FROM changed WHERE p.id = changed.proxy_id`, []any{code, redacted, increment})
 }
 
-func (l *ProxyRuntimeLease) MarkStopped(ctx context.Context) error {
+func (l *ProxyRuntimeLease) MarkStopped(ctx context.Context, autoStart bool) error {
 	return l.transition(ctx, []string{"pending", "starting", "healthy", "degraded", "blocked", "error", "stopped"}, `
 WITH changed AS (
     UPDATE proxy_runtimes
-    SET status = 'stopped', pid = NULL, last_stopped_at = NOW(), updated_at = NOW()
+    SET status = 'stopped', pid = NULL, auto_start = $3,
+        last_stopped_at = NOW(), updated_at = NOW()
     WHERE proxy_runtimes.id = $1 AND proxy_runtimes.deleted_at IS NULL AND status = ANY($2)
       AND EXISTS (SELECT 1 FROM proxies p WHERE p.id = proxy_runtimes.proxy_id AND p.deleted_at IS NULL)
     RETURNING proxy_id
 )
 UPDATE proxies p SET status = 'disabled', updated_at = NOW()
-FROM changed WHERE p.id = changed.proxy_id`, nil)
+FROM changed WHERE p.id = changed.proxy_id`, []any{autoStart})
 }
 
 func (l *ProxyRuntimeLease) transition(ctx context.Context, allowed []string, query string, extra []any) error {

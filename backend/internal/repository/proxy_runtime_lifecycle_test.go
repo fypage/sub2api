@@ -42,7 +42,7 @@ func TestProxyRuntimeLifecycleLeaseTransitionsAtomically(t *testing.T) {
 	mock.ExpectExec(regexp.QuoteMeta("SELECT pg_advisory_unlock(hashtextextended('proxy_runtime:' || $1::text, 0))")).
 		WithArgs(int64(42)).WillReturnResult(sqlmock.NewResult(0, 1))
 	lease.Release()
-	if err := lease.MarkStopped(context.Background()); !errors.Is(err, ErrProxyRuntimeLeaseReleased) {
+	if err := lease.MarkStopped(context.Background(), false); !errors.Is(err, ErrProxyRuntimeLeaseReleased) {
 		t.Fatalf("released lease remained usable: %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -83,6 +83,27 @@ func TestProxyRuntimeLifecycleRejectsInvalidTransitionsAndErrors(t *testing.T) {
 		t.Fatalf("stale transition accepted: %v", err)
 	}
 	mock.ExpectExec("pg_advisory_unlock").WithArgs(int64(7)).WillReturnResult(sqlmock.NewResult(0, 1))
+	lease.Release()
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestProxyRuntimeLifecycleStopPersistsRecoveryIntent(t *testing.T) {
+	repo, mock := newRuntimeRepoMock(t)
+	mock.ExpectQuery("pg_try_advisory_lock").WithArgs(int64(9)).
+		WillReturnRows(sqlmock.NewRows([]string{"locked"}).AddRow(true))
+	lease, acquired, err := repo.TryAcquireLifecycleLease(context.Background(), 9)
+	if err != nil || !acquired {
+		t.Fatal(err)
+	}
+	mock.ExpectExec("(?s)status = 'stopped'.*auto_start = \\$3").
+		WithArgs(int64(9), `{"pending","starting","healthy","degraded","blocked","error","stopped"}`, true).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	if err := lease.MarkStopped(context.Background(), true); err != nil {
+		t.Fatal(err)
+	}
+	mock.ExpectExec("pg_advisory_unlock").WithArgs(int64(9)).WillReturnResult(sqlmock.NewResult(0, 1))
 	lease.Release()
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
