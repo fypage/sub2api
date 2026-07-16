@@ -125,6 +125,12 @@ export async function stopNative(runtimeId: number): Promise<void> {
   await apiClient.post(`/admin/proxies/native/${runtimeId}/stop`)
 }
 
+export interface NativeProxyCreateResult {
+  proxy_id: number
+  runtime_id: number
+  status: string
+}
+
 export async function createNative(payload: {
   name?: string
   input: string
@@ -132,8 +138,19 @@ export async function createNative(payload: {
   visibility: 'private' | 'public'
   fallback_mode: 'none' | 'proxy' | 'direct'
   backup_proxy_id?: number | null
-}): Promise<{ proxy_id: number; runtime_id: number; status: string }> {
-  const { data } = await apiClient.post<{ proxy_id: number; runtime_id: number; status: string }>('/admin/proxies/native', payload)
+}): Promise<NativeProxyCreateResult> {
+  const { data } = await apiClient.post<NativeProxyCreateResult>('/admin/proxies/native', payload)
+  return data
+}
+
+export async function createNativeBatch(payload: {
+  input: string
+  fingerprints: string[]
+  visibility: 'private' | 'public'
+  fallback_mode: 'none' | 'proxy' | 'direct'
+  backup_proxy_id?: number | null
+}): Promise<NativeProxyCreateResult[]> {
+  const { data } = await apiClient.post<NativeProxyCreateResult[]>('/admin/proxies/native/batch', payload)
   return data
 }
 
@@ -313,6 +330,7 @@ export const proxiesAPI = {
   create,
   previewNative,
   createNative,
+  createNativeBatch,
   getNativeStatus,
   startNative,
   stopNative,

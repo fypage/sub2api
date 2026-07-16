@@ -562,12 +562,20 @@
           {{ nativePreviewing ? t('admin.proxies.nativePreviewing') : t('admin.proxies.nativePreview') }}
         </button>
         <div v-if="nativeCandidates.length" class="space-y-2">
+          <label v-if="nativeCandidates.length > 1" class="flex cursor-pointer items-center gap-3 rounded-lg border p-3 font-medium dark:border-dark-600">
+            <input
+              type="checkbox"
+              :checked="nativeForm.fingerprints.length === nativeCandidates.length"
+              @change="nativeForm.fingerprints = ($event.target as HTMLInputElement).checked ? nativeCandidates.map((candidate) => candidate.fingerprint) : []"
+            />
+            <span>{{ t('admin.proxies.nativeSelectAll') }}</span>
+          </label>
           <label v-for="candidate in nativeCandidates" :key="candidate.fingerprint" class="flex cursor-pointer items-center gap-3 rounded-lg border p-3 dark:border-dark-600">
-            <input v-model="nativeForm.fingerprint" type="radio" :value="candidate.fingerprint" />
+            <input v-model="nativeForm.fingerprints" type="checkbox" :value="candidate.fingerprint" />
             <span class="min-w-0"><strong>{{ candidate.name }}</strong><br><span class="text-xs text-gray-500">{{ candidate.protocol }} · {{ candidate.server_hint || '-' }}</span></span>
           </label>
         </div>
-        <div>
+        <div v-if="nativeForm.fingerprints.length <= 1">
           <label class="input-label">{{ t('admin.proxies.name') }}</label>
           <input v-model="nativeForm.name" class="input" :placeholder="t('admin.proxies.nativeNameOptional')" />
         </div>
@@ -682,7 +690,7 @@
             v-else-if="createMode === 'native'"
             @click="handleNativeCreate"
             type="button"
-            :disabled="submitting || !nativeForm.fingerprint"
+            :disabled="submitting || nativeForm.fingerprints.length === 0"
             class="btn btn-primary"
           >
             {{ submitting ? t('admin.proxies.creating') : t('common.create') }}
@@ -1179,7 +1187,7 @@ const nativeCandidates = ref<NativeProxyPreview[]>([])
 const nativeForm = reactive({
   name: '',
   input: '',
-  fingerprint: '',
+  fingerprints: [] as string[],
   isPublic: false,
   fallback_mode: 'none' as 'none' | 'proxy' | 'direct',
   backup_proxy_id: null as number | null,
@@ -1379,7 +1387,7 @@ const closeCreateModal = () => {
   createPasswordVisible.value = false
   nativeForm.name = ''
   nativeForm.input = ''
-  nativeForm.fingerprint = ''
+  nativeForm.fingerprints = []
   nativeForm.isPublic = false
   nativeForm.fallback_mode = 'none'
   nativeForm.backup_proxy_id = null
@@ -1490,10 +1498,10 @@ const handleNativePreview = async () => {
   nativePreviewing.value = true
   try {
     nativeCandidates.value = await adminAPI.proxies.previewNative(nativeForm.input)
-    nativeForm.fingerprint = nativeCandidates.value.length === 1 ? nativeCandidates.value[0].fingerprint : ''
+    nativeForm.fingerprints = nativeCandidates.value.length === 1 ? [nativeCandidates.value[0].fingerprint] : []
   } catch (error: any) {
     nativeCandidates.value = []
-    nativeForm.fingerprint = ''
+    nativeForm.fingerprints = []
     appStore.showError(error.response?.data?.detail || t('admin.proxies.nativePreviewFailed'))
   } finally {
     nativePreviewing.value = false
@@ -1501,19 +1509,35 @@ const handleNativePreview = async () => {
 }
 
 const handleNativeCreate = async () => {
-  if (!nativeForm.fingerprint) return
+  if (nativeForm.fingerprints.length === 0) return
   submitting.value = true
   try {
-    const result = await adminAPI.proxies.createNative({
-      name: nativeForm.name.trim() || undefined,
+    const common = {
       input: nativeForm.input,
-      fingerprint: nativeForm.fingerprint,
-      visibility: nativeForm.isPublic ? 'public' : 'private',
+      visibility: nativeForm.isPublic ? 'public' as const : 'private' as const,
       fallback_mode: nativeForm.fallback_mode,
       backup_proxy_id: nativeForm.fallback_mode === 'proxy' ? nativeForm.backup_proxy_id : null,
-    })
-    if (result.status === 'healthy') appStore.showSuccess(t('admin.proxies.nativeCreated'))
-    else appStore.showInfo(t('admin.proxies.nativeCreatedWithError'))
+    }
+    const results = nativeForm.fingerprints.length === 1
+      ? [await adminAPI.proxies.createNative({
+          ...common,
+          name: nativeForm.name.trim() || undefined,
+          fingerprint: nativeForm.fingerprints[0],
+        })]
+      : await adminAPI.proxies.createNativeBatch({
+          ...common,
+          fingerprints: nativeForm.fingerprints,
+        })
+    const healthy = results.filter((result) => result.status === 'healthy').length
+    if (healthy === results.length) {
+      appStore.showSuccess(t('admin.proxies.nativeBatchCreated', { count: results.length }))
+    } else {
+      appStore.showInfo(t('admin.proxies.nativeBatchCreatedWithIssues', {
+        count: results.length,
+        healthy,
+        issues: results.length - healthy,
+      }))
+    }
     closeCreateModal()
     loadProxies()
   } catch (error: any) {
