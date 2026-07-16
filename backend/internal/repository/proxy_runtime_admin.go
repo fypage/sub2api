@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
-	"errors"
 	"fmt"
 	"strings"
 
@@ -120,10 +119,6 @@ func (a *ProxyRuntimeAdmin) Create(ctx context.Context, request service.ProxyRun
 	if err != nil {
 		return nil, err
 	}
-	port, err := a.repository.AllocateLoopbackPort(ctx, 21000, 21999)
-	if err != nil {
-		return nil, err
-	}
 	name := strings.TrimSpace(request.Name)
 	if name == "" {
 		name = candidateName
@@ -131,7 +126,7 @@ func (a *ProxyRuntimeAdmin) Create(ctx context.Context, request service.ProxyRun
 	result, err := a.repository.CreateBatch(ctx, ProxyRuntimeBatchInput{OwnerUserID: request.OwnerUserID, Runtimes: []ProxyRuntimeCreateInput{{
 		Name: name, Visibility: request.Visibility,
 		NormalizedConfigEncrypted: encrypted, EncryptionVersion: 1,
-		NodeFingerprint: request.Fingerprint, ListenHost: "127.0.0.1", ListenPort: port,
+		NodeFingerprint: request.Fingerprint, ListenHost: "127.0.0.1", ListenPort: 0,
 		ListenUsername: username, ListenPassword: password,
 		FallbackMode: request.FallbackMode, BackupProxyID: request.BackupProxyID,
 	}}})
@@ -145,27 +140,8 @@ func (a *ProxyRuntimeAdmin) Create(ctx context.Context, request service.ProxyRun
 	return &service.ProxyRuntimeCreated{ProxyID: created.ProxyID, RuntimeID: created.RuntimeID}, nil
 }
 
-func (r *ProxyRuntimeRepository) AllocateLoopbackPort(ctx context.Context, first, last int) (int, error) {
-	if r == nil || r.db == nil || first < 1024 || last > 65535 || first > last || last-first > 10000 {
-		return 0, ErrProxyRuntimeInvalid
-	}
-	var port int
-	err := r.db.QueryRowContext(ctx, `
-SELECT candidate
-FROM generate_series($1, $2) AS candidate
-WHERE NOT EXISTS (
-    SELECT 1 FROM proxy_runtimes
-    WHERE deleted_at IS NULL AND listen_host = '127.0.0.1' AND listen_port = candidate
-)
-ORDER BY candidate LIMIT 1`, first, last).Scan(&port)
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return 0, err
-	}
-	if err != nil {
-		return 0, ErrProxyRuntimeConflict
-	}
-	return port, nil
-}
+// Listener ports are allocated inside CreateBatch's transaction under a
+// PostgreSQL advisory transaction lock; preview/create never reserves ports.
 
 func parseRuntimeInput(input string) ([]proxyimport.Result, []proxyimport.JSONCandidate, error) {
 	input = strings.TrimSpace(input)

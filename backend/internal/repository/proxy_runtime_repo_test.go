@@ -76,6 +76,30 @@ func TestProxyRuntimeRepositoryCreateBatchIsAtomicAndPending(t *testing.T) {
 	}
 }
 
+func TestProxyRuntimeRepositoryAllocatesPortInsideTransaction(t *testing.T) {
+	repo, mock := newRuntimeRepoMock(t)
+	input := runtimeTestInput()
+	input.Runtimes[0].ListenPort = 0
+	mock.ExpectBegin()
+	expectRuntimeSource(mock, 11)
+	mock.ExpectExec("pg_advisory_xact_lock").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery("SELECT candidate").WithArgs(21000, 21999).
+		WillReturnRows(sqlmock.NewRows([]string{"candidate"}).AddRow(21008))
+	mock.ExpectQuery("INSERT INTO proxies[\\s\\S]+VALUES \\(\\$1, 'socks5h'").
+		WithArgs("node", "127.0.0.1", 21008, "runtime-user-001", strings.Repeat("p", 32), "none", nil).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(21))
+	mock.ExpectQuery("INSERT INTO proxy_runtimes[\\s\\S]+'pending', TRUE").
+		WithArgs(int64(21), int64(11), int64(7), "private", "prx:v1:db-v1:config:ciphertext", int16(1), strings.Repeat("a", 64), "127.0.0.1", 21008).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(31))
+	mock.ExpectCommit()
+	if _, err := repo.CreateBatch(context.Background(), input); err != nil {
+		t.Fatal(err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestProxyRuntimeRepositoryCreateWithoutSource(t *testing.T) {
 	repo, mock := newRuntimeRepoMock(t)
 	input := runtimeTestInput()

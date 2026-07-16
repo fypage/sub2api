@@ -92,6 +92,13 @@ func (r *ProxyRuntimeRepository) CreateBatch(ctx context.Context, input ProxyRun
 		result.SourceID = &sourceID
 	}
 	for _, runtime := range input.Runtimes {
+		if runtime.ListenPort == 0 {
+			allocatedPort, err := allocateRuntimePortTx(ctx, tx, 21000, 21999)
+			if err != nil {
+				return nil, classifyRuntimeWriteError(err)
+			}
+			runtime.ListenPort = allocatedPort
+		}
 		proxyID, err := insertPendingProxy(ctx, tx, runtime)
 		if err != nil {
 			return nil, classifyRuntimeWriteError(err)
@@ -106,6 +113,28 @@ func (r *ProxyRuntimeRepository) CreateBatch(ctx context.Context, input ProxyRun
 		return nil, classifyRuntimeWriteError(err)
 	}
 	return result, nil
+}
+
+func allocateRuntimePortTx(ctx context.Context, tx *sql.Tx, first, last int) (int, error) {
+	if _, err := tx.ExecContext(ctx, "SELECT pg_advisory_xact_lock(hashtext('proxy_runtime_port_allocation'))"); err != nil {
+		return 0, fmt.Errorf("lock native proxy runtime port allocation: %w", err)
+	}
+	var port int
+	err := tx.QueryRowContext(ctx, `
+SELECT candidate
+FROM generate_series($1, $2) AS candidate
+WHERE NOT EXISTS (
+    SELECT 1 FROM proxy_runtimes
+    WHERE deleted_at IS NULL AND listen_host = '127.0.0.1' AND listen_port = candidate
+)
+ORDER BY candidate LIMIT 1`, first, last).Scan(&port)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, ErrProxyRuntimeConflict
+	}
+	if err != nil {
+		return 0, fmt.Errorf("allocate native proxy runtime port: %w", err)
+	}
+	return port, nil
 }
 
 func insertRuntimeSource(ctx context.Context, tx *sql.Tx, ownerID *int64, source ProxyRuntimeSourceInput) (int64, error) {
@@ -201,7 +230,7 @@ func validRuntimeCreate(runtime ProxyRuntimeCreateInput) bool {
 	if runtime.ListenHost != "127.0.0.1" && runtime.ListenHost != "::1" {
 		return false
 	}
-	if runtime.ListenPort < 1 || runtime.ListenPort > 65535 {
+	if runtime.ListenPort < 0 || runtime.ListenPort > 65535 {
 		return false
 	}
 	if len(runtime.ListenUsername) < 16 || len(runtime.ListenUsername) > 100 || len(runtime.ListenPassword) < 32 || len(runtime.ListenPassword) > 100 {
