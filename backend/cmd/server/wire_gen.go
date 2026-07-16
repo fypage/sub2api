@@ -59,6 +59,10 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 		return nil, err
 	}
 	proxySubscriptionFetcher := repository.NewProxySubscriptionFetcher()
+	proxySubscriptionRefresher, err := repository.ProvideProxySubscriptionRefresher(configConfig, client, proxyRuntimeRepository, proxyRuntimeManager, proxySubscriptionFetcher)
+	if err != nil {
+		return nil, err
+	}
 	proxyRuntimeAdmin, err := repository.ProvideProxyRuntimeAdmin(configConfig, client, proxyRuntimeRepository, proxyRuntimeManager, proxySubscriptionFetcher)
 	if err != nil {
 		return nil, err
@@ -301,7 +305,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	paymentOrderExpiryService := service.ProvidePaymentOrderExpiryService(paymentService, leaderLockCache, db)
 	channelMonitorRunner := service.ProvideChannelMonitorRunner(channelMonitorService, settingService)
 	userPlatformQuotaUsageFlusher := service.ProvideUserPlatformQuotaUsageFlusher(configConfig, billingCache, serviceUserPlatformQuotaRepository, timingWheelService)
-	v := provideCleanup(client, redisClient, opsMetricsCollector, opsAggregationService, opsAlertEvaluatorService, opsCleanupService, opsScheduledReportService, opsSystemLogSink, schedulerSnapshotService, tokenRefreshService, accountExpiryService, proxyExpiryService, subscriptionExpiryService, usageCleanupService, idempotencyCleanupService, batchImageCleanupService, batchImageWorkerRuntime, pricingService, emailQueueService, billingCacheService, usageRecordWorkerPool, subscriptionService, oAuthService, openAIOAuthService, geminiOAuthService, antigravityOAuthService, grokOAuthService, openAIGatewayService, scheduledTestRunnerService, backupService, paymentOrderExpiryService, channelMonitorRunner, userPlatformQuotaUsageFlusher, proxyRuntimeManager)
+	v := provideCleanup(client, redisClient, opsMetricsCollector, opsAggregationService, opsAlertEvaluatorService, opsCleanupService, opsScheduledReportService, opsSystemLogSink, schedulerSnapshotService, tokenRefreshService, accountExpiryService, proxyExpiryService, subscriptionExpiryService, usageCleanupService, idempotencyCleanupService, batchImageCleanupService, batchImageWorkerRuntime, pricingService, emailQueueService, billingCacheService, usageRecordWorkerPool, subscriptionService, oAuthService, openAIOAuthService, geminiOAuthService, antigravityOAuthService, grokOAuthService, openAIGatewayService, scheduledTestRunnerService, backupService, paymentOrderExpiryService, channelMonitorRunner, userPlatformQuotaUsageFlusher, proxyRuntimeManager, proxySubscriptionRefresher)
 	application := &Application{
 		Server:  httpServer,
 		Cleanup: v,
@@ -362,6 +366,7 @@ func provideCleanup(
 	channelMonitorRunner *service.ChannelMonitorRunner,
 	quotaFlusher *service.UserPlatformQuotaUsageFlusher,
 	proxyRuntimeManager *repository.ProxyRuntimeManager,
+	proxySubscriptionRefresher *repository.ProxySubscriptionRefresher,
 ) func() {
 	return func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -373,6 +378,12 @@ func provideCleanup(
 		}
 
 		parallelSteps := []cleanupStep{
+			{"ProxySubscriptionRefresher", func() error {
+				if proxySubscriptionRefresher != nil {
+					return proxySubscriptionRefresher.Stop(ctx)
+				}
+				return nil
+			}},
 			{"ProxyRuntimeManager", func() error {
 				if proxyRuntimeManager != nil {
 					return proxyRuntimeManager.StopAll(ctx)

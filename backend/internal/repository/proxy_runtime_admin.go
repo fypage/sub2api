@@ -173,7 +173,8 @@ func (a *ProxyRuntimeAdmin) resolveRuntimeInput(ctx context.Context, input strin
 		source := &ProxyRuntimeSourceInput{
 			Name: "subscription", SourceType: "singbox_subscription",
 			SourceSecretEncrypted: encryptedURL, EncryptionVersion: 1,
-			ETag: fetched.ETag, LastModified: fetched.LastModified,
+			RefreshIntervalMinutes: 60,
+			ETag:                   fetched.ETag, LastModified: fetched.LastModified,
 		}
 		return string(fetched.Body), source, nil
 	}

@@ -76,6 +76,7 @@ var ProviderSet = wire.NewSet(
 	NewProxySubscriptionFetcher,
 	ProvideProxyRuntimeManager,
 	ProvideProxyRuntimeAdmin,
+	ProvideProxySubscriptionRefresher,
 	wire.Bind(new(service.ProxyRuntimeAdminService), new(*ProxyRuntimeAdmin)),
 	wire.Bind(new(service.ProxyRuntimeController), new(*ProxyRuntimeAdmin)),
 	NewRedeemCodeRepository,
