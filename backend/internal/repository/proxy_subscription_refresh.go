@@ -146,6 +146,29 @@ WHERE id = $1 AND deleted_at IS NULL`, sourceID, status, etag, modified, code, t
 	return nil
 }
 
+func (r *ProxyRuntimeRepository) RecordSubscriptionDeferred(ctx context.Context, sourceID int64) error {
+	if r == nil || r.db == nil || sourceID <= 0 {
+		return ErrProxyRuntimeInvalid
+	}
+	result, err := r.db.ExecContext(ctx, `
+UPDATE proxy_runtime_sources
+SET last_sync_at = NULL, last_sync_status = 'partial',
+    last_error_code = 'subscription_update_deferred',
+    last_error_redacted = 'subscription update deferred', updated_at = NOW()
+WHERE id = $1 AND deleted_at IS NULL`, sourceID)
+	if err != nil {
+		return fmt.Errorf("defer proxy subscription sync: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows != 1 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
 func (r *ProxyRuntimeRepository) MarkSubscriptionRuntimeRemoved(ctx context.Context, runtimeID int64) error {
 	if r == nil || r.db == nil || runtimeID <= 0 {
 		return ErrProxyRuntimeInvalid

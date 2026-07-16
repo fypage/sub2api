@@ -47,6 +47,18 @@ func TestRecordSubscriptionSyncUsesRedactedMetadata(t *testing.T) {
 	}
 }
 
+func TestRecordSubscriptionDeferredRetriesWithoutAdvancingValidators(t *testing.T) {
+	repo, mock := newRuntimeRepoMock(t)
+	mock.ExpectExec("UPDATE proxy_runtime_sources").WithArgs(int64(5)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	if err := repo.RecordSubscriptionDeferred(context.Background(), 5); err != nil {
+		t.Fatal(err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestMarkRemovedSubscriptionRuntimeDisablesProxy(t *testing.T) {
 	repo, mock := newRuntimeRepoMock(t)
 	mock.ExpectExec("(?s)WITH changed AS .*subscription_node_removed.*UPDATE proxies").

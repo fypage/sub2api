@@ -204,7 +204,7 @@ func (r *ProxySubscriptionRefresher) refreshOne(ctx context.Context, source Prox
 	if deferred > 0 {
 		// Keep the previous validators so the next cycle receives the body
 		// again instead of a 304 before deferred lifecycle work is complete.
-		return r.repo.RecordSubscriptionSync(ctx, source.SourceID, status, source.ETag, source.LastModified, "subscription_update_deferred", "subscription update deferred")
+		return r.repo.RecordSubscriptionDeferred(ctx, source.SourceID)
 	}
 	return r.repo.RecordSubscriptionSync(ctx, source.SourceID, status, fetched.ETag, fetched.LastModified, "", "")
 }
