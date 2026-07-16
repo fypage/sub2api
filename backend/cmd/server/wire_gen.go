@@ -58,7 +58,8 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	if err != nil {
 		return nil, err
 	}
-	proxyRuntimeAdmin, err := repository.ProvideProxyRuntimeAdmin(configConfig, client, proxyRuntimeRepository, proxyRuntimeManager)
+	proxySubscriptionFetcher := repository.NewProxySubscriptionFetcher()
+	proxyRuntimeAdmin, err := repository.ProvideProxyRuntimeAdmin(configConfig, client, proxyRuntimeRepository, proxyRuntimeManager, proxySubscriptionFetcher)
 	if err != nil {
 		return nil, err
 	}

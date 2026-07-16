@@ -30,6 +30,8 @@ type ProxyRuntimeSourceInput struct {
 	SourceSecretEncrypted  string
 	EncryptionVersion      int16
 	RefreshIntervalMinutes int
+	ETag                   string
+	LastModified           string
 }
 
 type ProxyRuntimeCreateInput struct {
@@ -141,10 +143,12 @@ func insertRuntimeSource(ctx context.Context, tx *sql.Tx, ownerID *int64, source
 	var id int64
 	err := tx.QueryRowContext(ctx, `
 INSERT INTO proxy_runtime_sources
-(owner_user_id, name, source_type, source_secret_encrypted, encryption_version, refresh_interval_minutes)
-VALUES ($1, $2, $3, $4, $5, $6)
+(owner_user_id, name, source_type, source_secret_encrypted, encryption_version,
+ refresh_interval_minutes, etag, last_modified, last_sync_at, last_sync_status)
+VALUES ($1, $2, $3, $4, $5, $6, NULLIF($7, ''), NULLIF($8, ''), NOW(), 'success')
 RETURNING id`, nullableInt64(ownerID), strings.TrimSpace(source.Name), source.SourceType,
-		source.SourceSecretEncrypted, source.EncryptionVersion, source.RefreshIntervalMinutes).Scan(&id)
+		source.SourceSecretEncrypted, source.EncryptionVersion, source.RefreshIntervalMinutes,
+		source.ETag, source.LastModified).Scan(&id)
 	return id, err
 }
 

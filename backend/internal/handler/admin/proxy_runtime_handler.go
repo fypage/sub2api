@@ -43,7 +43,7 @@ func (h *ProxyRuntimeHandler) Preview(c *gin.Context) {
 		response.ErrorFrom(c, infraerrors.BadRequest("NATIVE_PROXY_RUNTIME_DISABLED", "native proxy runtime is disabled"))
 		return
 	}
-	previews, err := h.admin.Preview(request.Input)
+	previews, err := h.admin.Preview(c.Request.Context(), request.Input)
 	if err != nil {
 		response.ErrorFrom(c, infraerrors.BadRequest("NATIVE_PROXY_INPUT_INVALID", "invalid native proxy input"))
 		return
@@ -80,7 +80,7 @@ func (h *ProxyRuntimeHandler) Create(c *gin.Context) {
 			}
 			return nil, infraerrors.BadRequest("NATIVE_PROXY_CREATE_FAILED", "native proxy creation failed")
 		}
-		return gin.H{"proxy_id": created.ProxyID, "runtime_id": created.RuntimeID, "status": "healthy"}, nil
+		return gin.H{"proxy_id": created.ProxyID, "runtime_id": created.RuntimeID, "status": created.Status}, nil
 	})
 }
 

@@ -40,6 +40,7 @@ type ProxyRuntimeStatus struct {
 type ProxyRuntimeCreated struct {
 	ProxyID   int64
 	RuntimeID int64
+	Status    string
 }
 
 type ProxyRuntimeQualitySnapshot struct {
@@ -58,7 +59,7 @@ type ProxyRuntimeController interface {
 }
 
 type ProxyRuntimeAdminService interface {
-	Preview(input string) ([]ProxyRuntimePreview, error)
+	Preview(ctx context.Context, input string) ([]ProxyRuntimePreview, error)
 	Status(ctx context.Context, proxyID int64) (*ProxyRuntimeStatus, error)
 	Create(ctx context.Context, request ProxyRuntimeCreateRequest) (*ProxyRuntimeCreated, error)
 	Start(ctx context.Context, runtimeID int64) error

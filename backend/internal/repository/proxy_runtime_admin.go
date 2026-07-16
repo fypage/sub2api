@@ -16,17 +16,22 @@ type ProxyRuntimeAdmin struct {
 	repository *ProxyRuntimeRepository
 	manager    *ProxyRuntimeManager
 	keyring    *runtimecrypto.Keyring
+	fetcher    *ProxySubscriptionFetcher
 }
 
-func NewProxyRuntimeAdmin(repo *ProxyRuntimeRepository, manager *ProxyRuntimeManager, keyring *runtimecrypto.Keyring) *ProxyRuntimeAdmin {
-	return &ProxyRuntimeAdmin{repository: repo, manager: manager, keyring: keyring}
+func NewProxyRuntimeAdmin(repo *ProxyRuntimeRepository, manager *ProxyRuntimeManager, keyring *runtimecrypto.Keyring, fetcher *ProxySubscriptionFetcher) *ProxyRuntimeAdmin {
+	return &ProxyRuntimeAdmin{repository: repo, manager: manager, keyring: keyring, fetcher: fetcher}
 }
 
-func (a *ProxyRuntimeAdmin) Preview(input string) ([]service.ProxyRuntimePreview, error) {
+func (a *ProxyRuntimeAdmin) Preview(ctx context.Context, input string) ([]service.ProxyRuntimePreview, error) {
 	if a == nil || a.manager == nil || !a.manager.enabled {
 		return nil, ErrProxyRuntimeInvalid
 	}
-	share, jsonNodes, err := parseRuntimeInput(input)
+	payload, _, err := a.resolveRuntimeInput(ctx, input)
+	if err != nil {
+		return nil, err
+	}
+	share, jsonNodes, err := parseRuntimePayload(payload)
 	if err != nil {
 		return nil, err
 	}
@@ -81,7 +86,11 @@ func (a *ProxyRuntimeAdmin) Create(ctx context.Context, request service.ProxyRun
 	if a == nil || a.repository == nil || a.manager == nil || a.keyring == nil || !a.manager.enabled {
 		return nil, ErrProxyRuntimeInvalid
 	}
-	share, jsonNodes, err := parseRuntimeInput(request.Input)
+	payload, source, err := a.resolveRuntimeInput(ctx, request.Input)
+	if err != nil {
+		return nil, err
+	}
+	share, jsonNodes, err := parseRuntimePayload(payload)
 	if err != nil {
 		return nil, err
 	}
@@ -123,7 +132,7 @@ func (a *ProxyRuntimeAdmin) Create(ctx context.Context, request service.ProxyRun
 	if name == "" {
 		name = candidateName
 	}
-	result, err := a.repository.CreateBatch(ctx, ProxyRuntimeBatchInput{OwnerUserID: request.OwnerUserID, Runtimes: []ProxyRuntimeCreateInput{{
+	result, err := a.repository.CreateBatch(ctx, ProxyRuntimeBatchInput{OwnerUserID: request.OwnerUserID, Source: source, Runtimes: []ProxyRuntimeCreateInput{{
 		Name: name, Visibility: request.Visibility,
 		NormalizedConfigEncrypted: encrypted, EncryptionVersion: 1,
 		NodeFingerprint: request.Fingerprint, ListenHost: "127.0.0.1", ListenPort: 0,
@@ -135,15 +144,43 @@ func (a *ProxyRuntimeAdmin) Create(ctx context.Context, request service.ProxyRun
 	}
 	created := result.Items[0]
 	if err := a.manager.Start(ctx, created.RuntimeID); err != nil {
-		return &service.ProxyRuntimeCreated{ProxyID: created.ProxyID, RuntimeID: created.RuntimeID}, fmt.Errorf("native proxy created but failed to start: %w", err)
+		return &service.ProxyRuntimeCreated{ProxyID: created.ProxyID, RuntimeID: created.RuntimeID, Status: "error"}, fmt.Errorf("native proxy created but failed to start: %w", err)
 	}
-	return &service.ProxyRuntimeCreated{ProxyID: created.ProxyID, RuntimeID: created.RuntimeID}, nil
+	status, err := a.repository.GetRuntimeStatusByProxyID(ctx, created.ProxyID)
+	if err != nil {
+		return &service.ProxyRuntimeCreated{ProxyID: created.ProxyID, RuntimeID: created.RuntimeID, Status: "unknown"}, nil
+	}
+	return &service.ProxyRuntimeCreated{ProxyID: created.ProxyID, RuntimeID: created.RuntimeID, Status: status.Status}, nil
 }
 
 // Listener ports are allocated inside CreateBatch's transaction under a
 // PostgreSQL advisory transaction lock; preview/create never reserves ports.
 
-func parseRuntimeInput(input string) ([]proxyimport.Result, []proxyimport.JSONCandidate, error) {
+func (a *ProxyRuntimeAdmin) resolveRuntimeInput(ctx context.Context, input string) (string, *ProxyRuntimeSourceInput, error) {
+	trimmed := strings.TrimSpace(input)
+	if strings.HasPrefix(strings.ToLower(trimmed), "https://") && !strings.Contains(trimmed, "\n") {
+		if a.fetcher == nil || a.keyring == nil {
+			return "", nil, ErrProxyRuntimeInvalid
+		}
+		fetched, err := a.fetcher.Fetch(ctx, ProxySubscriptionFetchRequest{URL: trimmed})
+		if err != nil || fetched.NotModified {
+			return "", nil, fmt.Errorf("fetch native proxy subscription: %w", err)
+		}
+		encryptedURL, err := a.keyring.Encrypt("source", []byte(trimmed))
+		if err != nil {
+			return "", nil, fmt.Errorf("encrypt native proxy subscription URL: %w", err)
+		}
+		source := &ProxyRuntimeSourceInput{
+			Name: "subscription", SourceType: "singbox_subscription",
+			SourceSecretEncrypted: encryptedURL, EncryptionVersion: 1,
+			ETag: fetched.ETag, LastModified: fetched.LastModified,
+		}
+		return string(fetched.Body), source, nil
+	}
+	return trimmed, nil, nil
+}
+
+func parseRuntimePayload(input string) ([]proxyimport.Result, []proxyimport.JSONCandidate, error) {
 	input = strings.TrimSpace(input)
 	if input == "" || len(input) > 2<<20 {
 		return nil, nil, proxyimport.ErrInvalidInput

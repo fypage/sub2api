@@ -8,7 +8,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 )
 
-func ProvideProxyRuntimeAdmin(cfg *config.Config, client *ent.Client, repo *ProxyRuntimeRepository, manager *ProxyRuntimeManager) (*ProxyRuntimeAdmin, error) {
+func ProvideProxyRuntimeAdmin(cfg *config.Config, client *ent.Client, repo *ProxyRuntimeRepository, manager *ProxyRuntimeManager, fetcher *ProxySubscriptionFetcher) (*ProxyRuntimeAdmin, error) {
 	if cfg == nil || !cfg.NativeProxyRuntime.Enabled {
 		return &ProxyRuntimeAdmin{repository: repo, manager: manager}, nil
 	}
@@ -16,5 +16,5 @@ func ProvideProxyRuntimeAdmin(cfg *config.Config, client *ent.Client, repo *Prox
 	if err != nil {
 		return nil, fmt.Errorf("load native proxy runtime admin keyring: %w", err)
 	}
-	return NewProxyRuntimeAdmin(repo, manager, keyring), nil
+	return NewProxyRuntimeAdmin(repo, manager, keyring, fetcher), nil
 }

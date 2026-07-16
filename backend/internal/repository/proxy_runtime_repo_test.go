@@ -40,7 +40,7 @@ func newRuntimeRepoMock(t *testing.T) (*ProxyRuntimeRepository, sqlmock.Sqlmock)
 
 func expectRuntimeSource(mock sqlmock.Sqlmock, id int64) {
 	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO proxy_runtime_sources")).
-		WithArgs(int64(7), "subscription", "singbox_subscription", "prx:v1:db-v1:source:ciphertext", int16(1), 0).
+		WithArgs(int64(7), "subscription", "singbox_subscription", "prx:v1:db-v1:source:ciphertext", int16(1), 0, "", "").
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(id))
 }
 
