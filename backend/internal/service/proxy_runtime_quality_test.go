@@ -16,7 +16,7 @@ func TestNativeRuntimeQualityClassificationBlocksChatGPTBackend(t *testing.T) {
 
 func TestNativeRuntimeQualityClassificationSeparatesGenericFailure(t *testing.T) {
 	result := &ProxyQualityCheckResult{Score: 70, FailedCount: 1, Items: []ProxyQualityCheckItem{{Target: "anthropic", Status: "fail"}}}
-	status, code, _ := nativeRuntimeQualityClassification(result)
+	status, code, text := nativeRuntimeQualityClassification(result)
 	require.Equal(t, "degraded", status)
 	require.Equal(t, "quality_degraded", code)
 
