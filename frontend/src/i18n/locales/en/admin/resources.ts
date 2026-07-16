@@ -55,6 +55,8 @@ export default {
       nativePublic: 'Make available to all users',
       nativeCreated: 'Native proxy started',
       nativeCreatedWithError: 'Proxy created but failed to start; inspect its runtime status',
+      nativeControlSuccess: 'Runtime operation succeeded',
+      nativeControlFailed: 'Runtime operation failed',
       editProxy: 'Edit Proxy',
       deleteProxy: 'Delete Proxy',
       ad: {

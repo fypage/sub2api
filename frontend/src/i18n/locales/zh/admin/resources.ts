@@ -55,6 +55,8 @@ export default {
       nativePublic: '公开给所有用户使用',
       nativeCreated: '原生代理已启动',
       nativeCreatedWithError: '代理已创建，但启动失败；请检查运行状态',
+      nativeControlSuccess: '运行时操作成功',
+      nativeControlFailed: '运行时操作失败',
       editProxy: '编辑代理',
       deleteProxy: '删除代理',
       ad: {

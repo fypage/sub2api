@@ -270,6 +270,16 @@
           <template #cell-actions="{ row }">
             <div class="flex items-center gap-1">
               <button
+                v-if="nativeStatuses.has(row.id)"
+                @click="handleNativeControl(row)"
+                :disabled="nativeControlLoading.has(row.id)"
+                :title="nativeStatuses.get(row.id)?.last_error_redacted || nativeStatuses.get(row.id)?.status"
+                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-violet-50 hover:text-violet-600 disabled:opacity-50 dark:hover:bg-violet-900/20"
+              >
+                <Icon :name="nativeStatuses.get(row.id)?.status === 'healthy' ? 'refresh' : 'play'" size="sm" />
+                <span class="text-xs">{{ nativeStatuses.get(row.id)?.status }}</span>
+              </button>
+              <button
                 @click="handleTestConnection(row)"
                 :disabled="testingProxyIds.has(row.id)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-emerald-50 hover:text-emerald-600 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-emerald-900/20 dark:hover:text-emerald-400"
@@ -1023,7 +1033,7 @@ import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { adminAPI } from '@/api/admin'
 import type { Proxy, ProxyAccountSummary, ProxyProtocol, ProxyQualityCheckResult } from '@/types'
-import type { NativeProxyPreview } from '@/api/admin/proxies'
+import type { NativeProxyPreview, NativeProxyStatus } from '@/api/admin/proxies'
 import type { Column } from '@/components/common/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
@@ -1126,6 +1136,9 @@ const submitting = ref(false)
 const exportingData = ref(false)
 const testingProxyIds = ref<Set<number>>(new Set())
 const qualityCheckingProxyIds = ref<Set<number>>(new Set())
+const nativeStatuses = reactive(new Map<number, NativeProxyStatus>())
+const nativeStatusLoading = reactive(new Set<number>())
+const nativeControlLoading = reactive(new Set<number>())
 const batchTesting = ref(false)
 const batchQualityChecking = ref(false)
 const proxyTableRef = ref<HTMLElement | null>(null)
@@ -1270,6 +1283,7 @@ const loadProxies = async () => {
       return
     }
     proxies.value = response.items
+    void loadNativeStatuses(response.items)
     pagination.total = response.total
     pagination.pages = response.pages
   } catch (error) {
@@ -1283,6 +1297,42 @@ const loadProxies = async () => {
       loading.value = false
       abortController = null
     }
+  }
+}
+
+const loadNativeStatuses = async (rows: Proxy[]) => {
+  await Promise.all(rows.map(async (proxy) => {
+    if (nativeStatusLoading.has(proxy.id)) return
+    nativeStatusLoading.add(proxy.id)
+    try {
+      const status = await adminAPI.proxies.getNativeStatus(proxy.id)
+      nativeStatuses.set(proxy.id, status)
+    } catch {
+      nativeStatuses.delete(proxy.id)
+    } finally {
+      nativeStatusLoading.delete(proxy.id)
+    }
+  }))
+}
+
+const handleNativeControl = async (proxy: Proxy) => {
+  const runtime = nativeStatuses.get(proxy.id)
+  if (!runtime || nativeControlLoading.has(proxy.id)) return
+  nativeControlLoading.add(proxy.id)
+  try {
+    if (runtime.status === 'stopped' || runtime.status === 'error' || runtime.status === 'blocked' || runtime.status === 'degraded') {
+      await adminAPI.proxies.startNative(runtime.id)
+    } else {
+      await adminAPI.proxies.stopNative(runtime.id)
+    }
+    const refreshed = await adminAPI.proxies.getNativeStatus(proxy.id)
+    nativeStatuses.set(proxy.id, refreshed)
+    appStore.showSuccess(t('admin.proxies.nativeControlSuccess'))
+    loadProxies()
+  } catch (error: any) {
+    appStore.showError(error.response?.data?.detail || t('admin.proxies.nativeControlFailed'))
+  } finally {
+    nativeControlLoading.delete(proxy.id)
   }
 }
 
