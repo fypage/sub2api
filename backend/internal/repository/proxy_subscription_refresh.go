@@ -52,9 +52,10 @@ func (l *ProxySubscriptionRefreshLease) Release() {
 }
 
 type ProxySubscriptionRuntime struct {
-	RuntimeID   int64
-	ProxyID     int64
-	Fingerprint string
+	RuntimeID     int64
+	ProxyID       int64
+	Fingerprint   string
+	SourceNodeKey string
 }
 
 func (r *ProxyRuntimeRepository) ListDueSubscriptionSources(ctx context.Context, limit int) ([]ProxySubscriptionRefreshCandidate, error) {
@@ -95,7 +96,7 @@ func (r *ProxyRuntimeRepository) ListSourceRuntimes(ctx context.Context, sourceI
 		return nil, ErrProxyRuntimeInvalid
 	}
 	rows, err := r.db.QueryContext(ctx, `
-SELECT id, proxy_id, node_fingerprint
+SELECT id, proxy_id, node_fingerprint, COALESCE(source_node_key, '')
 FROM proxy_runtimes
 WHERE source_id = $1 AND deleted_at IS NULL
 ORDER BY id`, sourceID)
@@ -106,7 +107,7 @@ ORDER BY id`, sourceID)
 	var result []ProxySubscriptionRuntime
 	for rows.Next() {
 		var item ProxySubscriptionRuntime
-		if err := rows.Scan(&item.RuntimeID, &item.ProxyID, &item.Fingerprint); err != nil {
+		if err := rows.Scan(&item.RuntimeID, &item.ProxyID, &item.Fingerprint, &item.SourceNodeKey); err != nil {
 			return nil, fmt.Errorf("scan subscription runtime: %w", err)
 		}
 		result = append(result, item)

@@ -302,6 +302,117 @@ func (m *ProxyRuntimeManager) supervise(runtimeID int64, item *managedProxyRunti
 	}
 }
 
+func (m *ProxyRuntimeManager) validateReplacementConfig(ctx context.Context, snapshot *ProxyRuntimeSnapshot, encrypted string) error {
+	canonical, err := m.keyring.Decrypt("config", encrypted)
+	if err != nil {
+		return fmt.Errorf("decrypt replacement native proxy config: %w", err)
+	}
+	config, err := proxyimport.BuildCanonicalRuntimeConfig(canonical, proxyimport.RuntimeListener{
+		Host: snapshot.ListenHost, Port: snapshot.ListenPort,
+		Username: snapshot.ListenUsername, Password: snapshot.ListenPassword,
+	})
+	clear(canonical)
+	if err != nil {
+		return err
+	}
+	err = m.store.Validate(ctx, snapshot.ID, config)
+	clear(config)
+	return err
+}
+
+func (m *ProxyRuntimeManager) Reconfigure(ctx context.Context, runtimeID int64, encrypted, fingerprint, sourceNodeKey string) error {
+	if m == nil || !m.enabled || runtimeID <= 0 {
+		return ErrProxyRuntimeInvalid
+	}
+	m.mu.Lock()
+	item, exists := m.items[runtimeID]
+	m.mu.Unlock()
+	if !exists {
+		lease, acquired, err := m.repository.TryAcquireLifecycleLease(ctx, runtimeID)
+		if err != nil {
+			return err
+		}
+		if !acquired {
+			return ErrProxyRuntimeLeaseBusy
+		}
+		snapshot, err := lease.Snapshot(ctx)
+		if err != nil {
+			lease.Release()
+			return err
+		}
+		if err := m.validateReplacementConfig(ctx, snapshot, encrypted); err != nil {
+			lease.Release()
+			return err
+		}
+		if err := lease.UpdateConfig(ctx, encrypted, fingerprint, sourceNodeKey); err != nil {
+			lease.Release()
+			return err
+		}
+		if !snapshot.AutoStart {
+			lease.Release()
+			return nil
+		}
+		started, err := m.startWithLease(ctx, lease)
+		if err != nil {
+			_ = lease.MarkFailed(context.Background(), runtimeFailureCode(err), stableRuntimeError(err), false)
+			lease.Release()
+			return err
+		}
+		m.mu.Lock()
+		m.items[runtimeID] = started
+		m.wg.Add(1)
+		m.mu.Unlock()
+		go m.supervise(runtimeID, started)
+		return nil
+	}
+	snapshot, err := item.lease.Snapshot(ctx)
+	if err != nil {
+		return err
+	}
+	if err := m.validateReplacementConfig(ctx, snapshot, encrypted); err != nil {
+		return err
+	}
+	item.mu.Lock()
+	item.stopping = true
+	process := item.process
+	item.mu.Unlock()
+	if err := process.Stop(ctx); err != nil && !errors.Is(err, proxyruntime.ErrProcessStopTimeout) {
+		item.mu.Lock()
+		item.stopping = false
+		item.mu.Unlock()
+		return err
+	}
+	if err := item.lease.MarkStopped(ctx, true); err != nil {
+		m.remove(runtimeID, item, true)
+		return err
+	}
+	m.remove(runtimeID, item, false)
+	if err := item.lease.UpdateConfig(ctx, encrypted, fingerprint, sourceNodeKey); err != nil {
+		item.lease.Release()
+		return err
+	}
+	started, err := m.startWithLease(ctx, item.lease)
+	if err != nil {
+		_ = item.lease.MarkFailed(context.Background(), runtimeFailureCode(err), stableRuntimeError(err), false)
+		item.lease.Release()
+		return err
+	}
+	m.mu.Lock()
+	if _, conflict := m.items[runtimeID]; conflict {
+		m.mu.Unlock()
+		stopCtx, cancel := context.WithTimeout(context.Background(), started.processCfg.StopTimeout+time.Second)
+		_ = started.process.Stop(stopCtx)
+		cancel()
+		item.lease.Release()
+		return ErrProxyRuntimeAlreadyManaged
+	}
+	m.items[runtimeID] = started
+	m.wg.Add(1)
+	m.mu.Unlock()
+	go m.supervise(runtimeID, started)
+	return nil
+}
+
 func (m *ProxyRuntimeManager) Stop(ctx context.Context, runtimeID int64) error {
 	return m.stop(ctx, runtimeID, false)
 }

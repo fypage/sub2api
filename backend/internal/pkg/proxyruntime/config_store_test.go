@@ -46,6 +46,25 @@ func TestConfigStoreValidatesThenAtomicallyCommits(t *testing.T) {
 	}
 }
 
+func TestConfigStoreValidateDoesNotReplaceCommittedConfig(t *testing.T) {
+	dataDir := t.TempDir()
+	store := ConfigStore{DataDir: dataDir, Checker: checkerFunc(func(context.Context, string) error { return nil })}
+	path, err := store.ValidateAndCommit(context.Background(), 9, []byte("old-config"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Validate(context.Background(), 9, []byte("new-config")); err != nil {
+		t.Fatal(err)
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != "old-config" {
+		t.Fatalf("validation replaced committed config: %q", content)
+	}
+}
+
 func TestConfigStoreCheckFailurePreservesOldConfig(t *testing.T) {
 	dataDir := t.TempDir()
 	runtimeDir := filepath.Join(dataDir, "proxy-runtimes", "7")

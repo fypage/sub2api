@@ -29,7 +29,7 @@ func (a *ProxyRuntimeAdmin) CreateBatch(ctx context.Context, request service.Pro
 		selected[fingerprint] = true
 	}
 	inputs := make([]ProxyRuntimeCreateInput, 0, len(selected))
-	appendInput := func(name, fingerprint string, canonical []byte) error {
+	appendInput := func(name, protocol, fingerprint string, canonical []byte) error {
 		if !selected[fingerprint] {
 			return nil
 		}
@@ -49,14 +49,15 @@ func (a *ProxyRuntimeAdmin) CreateBatch(ctx context.Context, request service.Pro
 		inputs = append(inputs, ProxyRuntimeCreateInput{
 			Name: name, Visibility: request.Visibility,
 			NormalizedConfigEncrypted: encrypted, EncryptionVersion: 1,
-			NodeFingerprint: fingerprint, ListenHost: "127.0.0.1", ListenPort: 0,
+			NodeFingerprint: fingerprint, SourceNodeKey: runtimeSourceNodeKey(protocol, name),
+			ListenHost: "127.0.0.1", ListenPort: 0,
 			ListenUsername: username, ListenPassword: password,
 			FallbackMode: request.FallbackMode, BackupProxyID: request.BackupProxyID,
 		})
 		return nil
 	}
 	for _, candidate := range share {
-		if err := appendInput(candidate.Name, candidate.Fingerprint, append([]byte(nil), candidate.Outbound...)); err != nil {
+		if err := appendInput(candidate.Name, candidate.Protocol, candidate.Fingerprint, append([]byte(nil), candidate.Outbound...)); err != nil {
 			return nil, err
 		}
 	}
@@ -68,7 +69,7 @@ func (a *ProxyRuntimeAdmin) CreateBatch(ctx context.Context, request service.Pro
 		if err != nil {
 			return nil, err
 		}
-		if err := appendInput(candidate.Name, candidate.Fingerprint, canonical); err != nil {
+		if err := appendInput(candidate.Name, candidate.Protocol, candidate.Fingerprint, canonical); err != nil {
 			return nil, err
 		}
 	}

@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/proxyimport"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/runtimecrypto"
 )
 
@@ -107,20 +108,80 @@ func (r *ProxySubscriptionRefresher) refreshOne(ctx context.Context, source Prox
 	if err != nil {
 		return err
 	}
+	type refreshedNode struct {
+		fingerprint string
+		sourceKey   string
+		canonical   []byte
+	}
 	present := make(map[string]bool, len(share)+len(nodes))
+	bySourceKey := make(map[string]refreshedNode, len(share)+len(nodes))
+	ambiguousKeys := make(map[string]bool)
+	addSourceNode := func(node refreshedNode) {
+		if existing, exists := bySourceKey[node.sourceKey]; exists {
+			clear(existing.canonical)
+			clear(node.canonical)
+			ambiguousKeys[node.sourceKey] = true
+			delete(bySourceKey, node.sourceKey)
+			return
+		}
+		if ambiguousKeys[node.sourceKey] {
+			clear(node.canonical)
+			return
+		}
+		bySourceKey[node.sourceKey] = node
+	}
+	defer func() {
+		for _, node := range bySourceKey {
+			clear(node.canonical)
+		}
+	}()
 	for _, candidate := range share {
 		present[candidate.Fingerprint] = true
+		key := runtimeSourceNodeKey(candidate.Protocol, candidate.Name)
+		if key != "" {
+			addSourceNode(refreshedNode{fingerprint: candidate.Fingerprint, sourceKey: key, canonical: append([]byte(nil), candidate.Outbound...)})
+		}
 	}
 	for _, candidate := range nodes {
 		present[candidate.Fingerprint] = true
+		key := runtimeSourceNodeKey(candidate.Protocol, candidate.Name)
+		if key == "" {
+			continue
+		}
+		canonical, encodeErr := proxyimport.EncodeCanonicalCandidate(candidate)
+		if encodeErr != nil {
+			return encodeErr
+		}
+		addSourceNode(refreshedNode{fingerprint: candidate.Fingerprint, sourceKey: key, canonical: canonical})
 	}
 	runtimes, err := r.repo.ListSourceRuntimes(ctx, source.SourceID)
 	if err != nil {
 		return err
 	}
-	removed := 0
+	removed, updated, deferred := 0, 0, 0
 	for _, runtime := range runtimes {
 		if present[runtime.Fingerprint] {
+			continue
+		}
+		if runtime.SourceNodeKey != "" && ambiguousKeys[runtime.SourceNodeKey] {
+			// A duplicate protocol/name selector cannot safely identify which
+			// changed node belongs to this runtime. Never guess or remove it.
+			deferred++
+			continue
+		}
+		if replacement, ok := bySourceKey[runtime.SourceNodeKey]; ok && replacement.fingerprint != runtime.Fingerprint {
+			encrypted, encryptErr := r.keyring.Encrypt("config", replacement.canonical)
+			clear(replacement.canonical)
+			if encryptErr != nil {
+				return encryptErr
+			}
+			if err := r.manager.Reconfigure(ctx, runtime.RuntimeID, encrypted, replacement.fingerprint, replacement.sourceKey); err != nil {
+				// A remote replica may own the lifecycle lease. Leave both the
+				// durable config and process untouched and retry next cycle.
+				deferred++
+				continue
+			}
+			updated++
 			continue
 		}
 		status, statusErr := r.repo.GetRuntimeStatusByProxyID(ctx, runtime.ProxyID)
@@ -137,8 +198,13 @@ func (r *ProxySubscriptionRefresher) refreshOne(ctx context.Context, source Prox
 		removed++
 	}
 	status := "success"
-	if removed > 0 {
+	if removed > 0 || updated > 0 || deferred > 0 {
 		status = "partial"
+	}
+	if deferred > 0 {
+		// Keep the previous validators so the next cycle receives the body
+		// again instead of a 304 before deferred lifecycle work is complete.
+		return r.repo.RecordSubscriptionSync(ctx, source.SourceID, status, source.ETag, source.LastModified, "subscription_update_deferred", "subscription update deferred")
 	}
 	return r.repo.RecordSubscriptionSync(ctx, source.SourceID, status, fetched.ETag, fetched.LastModified, "", "")
 }

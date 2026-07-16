@@ -52,7 +52,7 @@ func expectPendingProxy(mock sqlmock.Sqlmock, id int64) {
 
 func expectPendingRuntime(mock sqlmock.Sqlmock, id, proxyID, sourceID int64) {
 	mock.ExpectQuery("INSERT INTO proxy_runtimes[\\s\\S]+'pending', TRUE").
-		WithArgs(proxyID, sourceID, int64(7), "private", "prx:v1:db-v1:config:ciphertext", int16(1), strings.Repeat("a", 64), "127.0.0.1", 21001).
+		WithArgs(proxyID, sourceID, int64(7), "private", "prx:v1:db-v1:config:ciphertext", int16(1), strings.Repeat("a", 64), "", "127.0.0.1", 21001).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(id))
 }
 
@@ -89,7 +89,7 @@ func TestProxyRuntimeRepositoryAllocatesPortInsideTransaction(t *testing.T) {
 		WithArgs("node", "127.0.0.1", 21008, "runtime-user-001", strings.Repeat("p", 32), "none", nil).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(21))
 	mock.ExpectQuery("INSERT INTO proxy_runtimes[\\s\\S]+'pending', TRUE").
-		WithArgs(int64(21), int64(11), int64(7), "private", "prx:v1:db-v1:config:ciphertext", int16(1), strings.Repeat("a", 64), "127.0.0.1", 21008).
+		WithArgs(int64(21), int64(11), int64(7), "private", "prx:v1:db-v1:config:ciphertext", int16(1), strings.Repeat("a", 64), "", "127.0.0.1", 21008).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(31))
 	mock.ExpectCommit()
 	if _, err := repo.CreateBatch(context.Background(), input); err != nil {
@@ -107,7 +107,7 @@ func TestProxyRuntimeRepositoryCreateWithoutSource(t *testing.T) {
 	mock.ExpectBegin()
 	expectPendingProxy(mock, 21)
 	mock.ExpectQuery("INSERT INTO proxy_runtimes[\\s\\S]+'pending', TRUE").
-		WithArgs(int64(21), nil, int64(7), "private", "prx:v1:db-v1:config:ciphertext", int16(1), strings.Repeat("a", 64), "127.0.0.1", 21001).
+		WithArgs(int64(21), nil, int64(7), "private", "prx:v1:db-v1:config:ciphertext", int16(1), strings.Repeat("a", 64), "", "127.0.0.1", 21001).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(31))
 	mock.ExpectCommit()
 	result, err := repo.CreateBatch(context.Background(), input)

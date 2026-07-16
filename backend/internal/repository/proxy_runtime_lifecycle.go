@@ -40,6 +40,8 @@ type ProxyRuntimeSnapshot struct {
 	ProxyID                   int64
 	NormalizedConfigEncrypted string
 	EncryptionVersion         int16
+	NodeFingerprint           string
+	SourceNodeKey             string
 	ListenHost                string
 	ListenPort                int
 	ListenUsername            string
@@ -135,13 +137,15 @@ func (l *ProxyRuntimeLease) Snapshot(ctx context.Context) (*ProxyRuntimeSnapshot
 	var snapshot ProxyRuntimeSnapshot
 	err := l.conn.QueryRowContext(ctx, `
 SELECT r.id, r.proxy_id, r.normalized_config_encrypted, r.encryption_version,
+       r.node_fingerprint, COALESCE(r.source_node_key, ''),
        r.listen_host, r.listen_port, p.username, p.password,
        r.status, r.auto_start, r.restart_count
 FROM proxy_runtimes r
 JOIN proxies p ON p.id = r.proxy_id AND p.deleted_at IS NULL
 WHERE r.id = $1 AND r.deleted_at IS NULL`, l.runtimeID).Scan(
 		&snapshot.ID, &snapshot.ProxyID, &snapshot.NormalizedConfigEncrypted,
-		&snapshot.EncryptionVersion, &snapshot.ListenHost, &snapshot.ListenPort,
+		&snapshot.EncryptionVersion, &snapshot.NodeFingerprint, &snapshot.SourceNodeKey,
+		&snapshot.ListenHost, &snapshot.ListenPort,
 		&snapshot.ListenUsername, &snapshot.ListenPassword,
 		&snapshot.Status, &snapshot.AutoStart, &snapshot.RestartCount)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -151,6 +155,33 @@ WHERE r.id = $1 AND r.deleted_at IS NULL`, l.runtimeID).Scan(
 		return nil, fmt.Errorf("load native proxy runtime: %w", err)
 	}
 	return &snapshot, nil
+}
+
+func (l *ProxyRuntimeLease) UpdateConfig(ctx context.Context, encrypted, fingerprint, sourceNodeKey string) error {
+	if err := l.validate(); err != nil {
+		return err
+	}
+	if !validEncryptedPurpose(encrypted, "config") || len(encrypted) > maxProxyRuntimeCiphertext ||
+		!runtimeFingerprintPattern.MatchString(fingerprint) ||
+		(sourceNodeKey != "" && !runtimeFingerprintPattern.MatchString(sourceNodeKey)) {
+		return ErrProxyRuntimeInvalid
+	}
+	result, err := l.conn.ExecContext(ctx, `
+UPDATE proxy_runtimes
+SET normalized_config_encrypted = $2, encryption_version = 1,
+    node_fingerprint = $3, source_node_key = NULLIF($4, ''), updated_at = NOW()
+WHERE id = $1 AND deleted_at IS NULL`, l.runtimeID, encrypted, fingerprint, sourceNodeKey)
+	if err != nil {
+		return classifyRuntimeWriteError(err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed != 1 {
+		return ErrProxyRuntimeStateConflict
+	}
+	return nil
 }
 
 func (l *ProxyRuntimeLease) MarkStarting(ctx context.Context) error {

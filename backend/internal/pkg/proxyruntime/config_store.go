@@ -47,6 +47,39 @@ type ConfigStore struct {
 	Checker ConfigChecker
 }
 
+func (s ConfigStore) Validate(ctx context.Context, runtimeID int64, config []byte) error {
+	if runtimeID <= 0 || len(config) == 0 || len(config) > 4<<20 || s.Checker == nil || !filepath.IsAbs(s.DataDir) {
+		return ErrInvalidConfigStoreInput
+	}
+	root := filepath.Join(filepath.Clean(s.DataDir), "proxy-runtimes")
+	runtimeDir := filepath.Join(root, strconv.FormatInt(runtimeID, 10))
+	if err := ensurePrivateDirectory(root); err != nil {
+		return err
+	}
+	if err := ensurePrivateDirectory(runtimeDir); err != nil {
+		return err
+	}
+	temporary, err := os.CreateTemp(runtimeDir, ".validate-*.tmp")
+	if err != nil {
+		return fmt.Errorf("create runtime config validation file: %w", err)
+	}
+	path := temporary.Name()
+	defer func() { _ = temporary.Close(); _ = os.Remove(path) }()
+	if err := temporary.Chmod(0600); err != nil {
+		return fmt.Errorf("set runtime config validation permissions: %w", err)
+	}
+	if _, err := temporary.Write(config); err != nil {
+		return fmt.Errorf("write runtime config validation file: %w", err)
+	}
+	if err := temporary.Sync(); err != nil {
+		return fmt.Errorf("sync runtime config validation file: %w", err)
+	}
+	if err := temporary.Close(); err != nil {
+		return fmt.Errorf("close runtime config validation file: %w", err)
+	}
+	return s.Checker.Check(ctx, path)
+}
+
 func (s ConfigStore) ValidateAndCommit(ctx context.Context, runtimeID int64, config []byte) (string, error) {
 	if runtimeID <= 0 || len(config) == 0 || len(config) > 4<<20 || s.Checker == nil || !filepath.IsAbs(s.DataDir) {
 		return "", ErrInvalidConfigStoreInput

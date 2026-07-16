@@ -3,7 +3,9 @@ package repository
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"strings"
 
@@ -95,11 +97,11 @@ func (a *ProxyRuntimeAdmin) Create(ctx context.Context, request service.ProxyRun
 		return nil, err
 	}
 	var canonical []byte
-	var candidateName string
+	var candidateName, candidateProtocol string
 	for _, candidate := range share {
 		if candidate.Fingerprint == request.Fingerprint {
 			canonical = append([]byte(nil), candidate.Outbound...)
-			candidateName = candidate.Name
+			candidateName, candidateProtocol = candidate.Name, candidate.Protocol
 			break
 		}
 	}
@@ -107,7 +109,7 @@ func (a *ProxyRuntimeAdmin) Create(ctx context.Context, request service.ProxyRun
 		for _, candidate := range jsonNodes {
 			if candidate.Fingerprint == request.Fingerprint {
 				canonical, err = proxyimport.EncodeCanonicalCandidate(candidate)
-				candidateName = candidate.Name
+				candidateName, candidateProtocol = candidate.Name, candidate.Protocol
 				break
 			}
 		}
@@ -135,7 +137,8 @@ func (a *ProxyRuntimeAdmin) Create(ctx context.Context, request service.ProxyRun
 	result, err := a.repository.CreateBatch(ctx, ProxyRuntimeBatchInput{OwnerUserID: request.OwnerUserID, Source: source, Runtimes: []ProxyRuntimeCreateInput{{
 		Name: name, Visibility: request.Visibility,
 		NormalizedConfigEncrypted: encrypted, EncryptionVersion: 1,
-		NodeFingerprint: request.Fingerprint, ListenHost: "127.0.0.1", ListenPort: 0,
+		NodeFingerprint: request.Fingerprint, SourceNodeKey: runtimeSourceNodeKey(candidateProtocol, candidateName),
+		ListenHost: "127.0.0.1", ListenPort: 0,
 		ListenUsername: username, ListenPassword: password,
 		FallbackMode: request.FallbackMode, BackupProxyID: request.BackupProxyID,
 	}}})
@@ -197,6 +200,16 @@ func parseRuntimePayload(input string) ([]proxyimport.Result, []proxyimport.JSON
 		return nil, nil, err
 	}
 	return parsed.Candidates, parsed.JSONNodes, nil
+}
+
+func runtimeSourceNodeKey(protocol, name string) string {
+	protocol = strings.ToLower(strings.TrimSpace(protocol))
+	name = strings.TrimSpace(name)
+	if protocol == "" || name == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(protocol + "\x00" + name))
+	return hex.EncodeToString(sum[:])
 }
 
 func randomRuntimeCredential(bytesCount int) (string, error) {

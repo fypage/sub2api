@@ -40,6 +40,7 @@ type ProxyRuntimeCreateInput struct {
 	NormalizedConfigEncrypted string
 	EncryptionVersion         int16
 	NodeFingerprint           string
+	SourceNodeKey             string
 	ListenHost                string
 	ListenPort                int
 	ListenUsername            string
@@ -172,11 +173,11 @@ func insertPendingRuntime(ctx context.Context, tx *sql.Tx, proxyID int64, source
 	err := tx.QueryRowContext(ctx, `
 INSERT INTO proxy_runtimes
 (proxy_id, source_id, owner_user_id, visibility, normalized_config_encrypted,
- encryption_version, node_fingerprint, listen_host, listen_port, status, auto_start)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', TRUE)
+ encryption_version, node_fingerprint, source_node_key, listen_host, listen_port, status, auto_start)
+VALUES ($1, $2, $3, $4, $5, $6, $7, NULLIF($8, ''), $9, $10, 'pending', TRUE)
 RETURNING id`, proxyID, nullableInt64(sourceID), nullableInt64(ownerID), runtime.Visibility,
 		runtime.NormalizedConfigEncrypted, runtime.EncryptionVersion, runtime.NodeFingerprint,
-		runtime.ListenHost, runtime.ListenPort).Scan(&id)
+		runtime.SourceNodeKey, runtime.ListenHost, runtime.ListenPort).Scan(&id)
 	return id, err
 }
 
@@ -228,7 +229,7 @@ func validRuntimeSource(source ProxyRuntimeSourceInput) bool {
 
 func validRuntimeCreate(runtime ProxyRuntimeCreateInput) bool {
 	name := strings.TrimSpace(runtime.Name)
-	if name == "" || len(name) > 100 || len(runtime.NormalizedConfigEncrypted) > maxProxyRuntimeCiphertext || !validEncryptedPurpose(runtime.NormalizedConfigEncrypted, "config") || runtime.EncryptionVersion <= 0 || !runtimeFingerprintPattern.MatchString(runtime.NodeFingerprint) {
+	if name == "" || len(name) > 100 || len(runtime.NormalizedConfigEncrypted) > maxProxyRuntimeCiphertext || !validEncryptedPurpose(runtime.NormalizedConfigEncrypted, "config") || runtime.EncryptionVersion <= 0 || !runtimeFingerprintPattern.MatchString(runtime.NodeFingerprint) || (runtime.SourceNodeKey != "" && !runtimeFingerprintPattern.MatchString(runtime.SourceNodeKey)) {
 		return false
 	}
 	if runtime.ListenHost != "127.0.0.1" && runtime.ListenHost != "::1" {
