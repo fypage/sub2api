@@ -6,7 +6,7 @@ import (
 )
 
 func TestNativeProxySubscriptionNodeKeyMigrationIsAdditive(t *testing.T) {
-	content, err := FS.ReadFile("182_native_proxy_subscription_node_key.sql")
+	content, err := FS.ReadFile("183_native_proxy_subscription_node_key.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
