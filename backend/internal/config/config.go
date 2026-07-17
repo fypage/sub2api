@@ -609,6 +609,8 @@ type NativeProxyRuntimeConfig struct {
 	MaxRestarts         int    `mapstructure:"max_restarts"`
 	RestartBaseSeconds  int    `mapstructure:"restart_base_seconds"`
 	RestartMaxSeconds   int    `mapstructure:"restart_max_seconds"`
+	MaxInstances        int    `mapstructure:"max_instances"`
+	MaxInstancesPerUser int    `mapstructure:"max_instances_per_user"`
 }
 
 // TokenRefreshConfig OAuth token自动刷新配置
@@ -1678,6 +1680,12 @@ func load(allowMissingJWTSecret bool) (*Config, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("validate config error: %w", err)
 	}
+	if cfg.NativeProxyRuntime.MaxInstances <= 0 || cfg.NativeProxyRuntime.MaxInstances > 1024 {
+		return nil, fmt.Errorf("validate config error: native_proxy_runtime.max_instances must be between 1 and 1024")
+	}
+	if cfg.NativeProxyRuntime.MaxInstancesPerUser <= 0 || cfg.NativeProxyRuntime.MaxInstancesPerUser > cfg.NativeProxyRuntime.MaxInstances {
+		return nil, fmt.Errorf("validate config error: native_proxy_runtime.max_instances_per_user must be between 1 and max_instances")
+	}
 
 	if allowMissingJWTSecret && originalJWTSecret == "" {
 		cfg.JWT.Secret = ""
@@ -1733,6 +1741,8 @@ func setDefaults() {
 	viper.SetDefault("native_proxy_runtime.max_restarts", 5)
 	viper.SetDefault("native_proxy_runtime.restart_base_seconds", 1)
 	viper.SetDefault("native_proxy_runtime.restart_max_seconds", 30)
+	viper.SetDefault("native_proxy_runtime.max_instances", 64)
+	viper.SetDefault("native_proxy_runtime.max_instances_per_user", 16)
 
 	// Log
 	viper.SetDefault("log.level", "info")
@@ -2228,7 +2238,6 @@ func setDefaults() {
 	// Subscription Maintenance (bounded queue + worker pool)
 	viper.SetDefault("subscription_maintenance.worker_count", 2)
 	viper.SetDefault("subscription_maintenance.queue_size", 1024)
-
 }
 
 func (c *Config) Validate() error {

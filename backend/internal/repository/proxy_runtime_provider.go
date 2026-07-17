@@ -43,6 +43,8 @@ func ProvideProxyRuntimeManager(cfg *config.Config, client *ent.Client, repo *Pr
 			BaseDelay:   time.Duration(cfg.NativeProxyRuntime.RestartBaseSeconds) * time.Second,
 			MaxDelay:    time.Duration(cfg.NativeProxyRuntime.RestartMaxSeconds) * time.Second,
 		},
+		MaxInstances: cfg.NativeProxyRuntime.MaxInstances,
+		MaxPerUser:   cfg.NativeProxyRuntime.MaxInstancesPerUser,
 	}
 	manager, err := NewProxyRuntimeManager(repo, keyring, qualityGate, options)
 	if err != nil {

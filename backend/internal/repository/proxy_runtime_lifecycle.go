@@ -38,6 +38,7 @@ type ProxyRuntimeStatus struct {
 type ProxyRuntimeSnapshot struct {
 	ID                        int64
 	ProxyID                   int64
+	OwnerUserID               *int64
 	NormalizedConfigEncrypted string
 	EncryptionVersion         int16
 	NodeFingerprint           string
@@ -136,14 +137,14 @@ func (l *ProxyRuntimeLease) Snapshot(ctx context.Context) (*ProxyRuntimeSnapshot
 	}
 	var snapshot ProxyRuntimeSnapshot
 	err := l.conn.QueryRowContext(ctx, `
-SELECT r.id, r.proxy_id, r.normalized_config_encrypted, r.encryption_version,
+SELECT r.id, r.proxy_id, r.owner_user_id, r.normalized_config_encrypted, r.encryption_version,
        r.node_fingerprint, COALESCE(r.source_node_key, ''),
        r.listen_host, r.listen_port, p.username, p.password,
        r.status, r.auto_start, r.restart_count
 FROM proxy_runtimes r
 JOIN proxies p ON p.id = r.proxy_id AND p.deleted_at IS NULL
 WHERE r.id = $1 AND r.deleted_at IS NULL`, l.runtimeID).Scan(
-		&snapshot.ID, &snapshot.ProxyID, &snapshot.NormalizedConfigEncrypted,
+		&snapshot.ID, &snapshot.ProxyID, &snapshot.OwnerUserID, &snapshot.NormalizedConfigEncrypted,
 		&snapshot.EncryptionVersion, &snapshot.NodeFingerprint, &snapshot.SourceNodeKey,
 		&snapshot.ListenHost, &snapshot.ListenPort,
 		&snapshot.ListenUsername, &snapshot.ListenPassword,

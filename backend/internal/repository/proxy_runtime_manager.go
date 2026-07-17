@@ -19,6 +19,8 @@ import (
 var (
 	ErrProxyRuntimeAlreadyManaged = errors.New("native proxy runtime is already managed locally")
 	ErrProxyRuntimeLeaseBusy      = errors.New("native proxy runtime is managed by another instance")
+	ErrProxyRuntimeInstanceLimit  = errors.New("native proxy runtime instance limit reached")
+	ErrProxyRuntimeUserLimit      = errors.New("native proxy runtime per-user instance limit reached")
 )
 
 type runtimeProcess interface {
@@ -38,14 +40,15 @@ func (nativeProcessStarter) Start(ctx context.Context, config proxyruntime.Proce
 }
 
 type managedProxyRuntime struct {
-	lease      *ProxyRuntimeLease
-	process    runtimeProcess
-	configPath string
-	processCfg proxyruntime.ProcessConfig
-	proxyID    int64
-	proxyURL   string
-	stopping   bool
-	mu         sync.Mutex
+	lease       *ProxyRuntimeLease
+	process     runtimeProcess
+	configPath  string
+	processCfg  proxyruntime.ProcessConfig
+	proxyID     int64
+	ownerUserID *int64
+	proxyURL    string
+	stopping    bool
+	mu          sync.Mutex
 }
 
 type ProxyRuntimeManager struct {
@@ -60,6 +63,8 @@ type ProxyRuntimeManager struct {
 	readyTimeout  time.Duration
 	probeInterval time.Duration
 	stopTimeout   time.Duration
+	maxInstances  int
+	maxPerUser    int
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -89,6 +94,8 @@ type ProxyRuntimeManagerOptions struct {
 	ProbeInterval time.Duration
 	StopTimeout   time.Duration
 	RestartPolicy proxyruntime.RestartPolicy
+	MaxInstances  int
+	MaxPerUser    int
 }
 
 func NewProxyRuntimeManager(repo *ProxyRuntimeRepository, keyring *runtimecrypto.Keyring, qualityGate RuntimeQualityGate, options ProxyRuntimeManagerOptions) (*ProxyRuntimeManager, error) {
@@ -108,6 +115,15 @@ func NewProxyRuntimeManager(repo *ProxyRuntimeRepository, keyring *runtimecrypto
 	if options.RestartPolicy.MaxRestarts == 0 {
 		options.RestartPolicy = proxyruntime.RestartPolicy{MaxRestarts: 5, BaseDelay: time.Second, MaxDelay: 30 * time.Second}
 	}
+	if options.MaxInstances <= 0 || options.MaxInstances > 1024 {
+		options.MaxInstances = 64
+	}
+	if options.MaxPerUser <= 0 || options.MaxPerUser > options.MaxInstances {
+		options.MaxPerUser = 16
+		if options.MaxPerUser > options.MaxInstances {
+			options.MaxPerUser = options.MaxInstances
+		}
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	return &ProxyRuntimeManager{
 		enabled: options.Enabled, repository: repo, keyring: keyring,
@@ -115,6 +131,7 @@ func NewProxyRuntimeManager(repo *ProxyRuntimeRepository, keyring *runtimecrypto
 		starter: nativeProcessStarter{}, policy: options.RestartPolicy, qualityGate: qualityGate,
 		binaryPath: options.BinaryPath, readyTimeout: options.ReadyTimeout,
 		probeInterval: options.ProbeInterval, stopTimeout: options.StopTimeout,
+		maxInstances: options.MaxInstances, maxPerUser: options.MaxPerUser,
 		ctx: ctx, cancel: cancel, items: make(map[int64]*managedProxyRuntime),
 	}, nil
 }
@@ -137,6 +154,29 @@ func (m *ProxyRuntimeManager) Recover(ctx context.Context) error {
 	return nil
 }
 
+func (m *ProxyRuntimeManager) checkInstanceLimit(ownerID *int64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	active := 0
+	owned := 0
+	for _, item := range m.items {
+		if item == nil {
+			continue
+		}
+		active++
+		if ownerID != nil && item.ownerUserID != nil && *ownerID == *item.ownerUserID {
+			owned++
+		}
+	}
+	if active >= m.maxInstances {
+		return ErrProxyRuntimeInstanceLimit
+	}
+	if ownerID != nil && owned >= m.maxPerUser {
+		return ErrProxyRuntimeUserLimit
+	}
+	return nil
+}
+
 func (m *ProxyRuntimeManager) Start(ctx context.Context, runtimeID int64) error {
 	if m == nil || !m.enabled || runtimeID <= 0 {
 		return ErrProxyRuntimeInvalid
@@ -154,6 +194,15 @@ func (m *ProxyRuntimeManager) Start(ctx context.Context, runtimeID int64) error 
 	}
 	if !acquired {
 		return ErrProxyRuntimeLeaseBusy
+	}
+	snapshot, err := lease.Snapshot(ctx)
+	if err != nil {
+		lease.Release()
+		return err
+	}
+	if err := m.checkInstanceLimit(snapshot.OwnerUserID); err != nil {
+		lease.Release()
+		return err
 	}
 	started, err := m.startWithLease(ctx, lease)
 	if err != nil {
@@ -238,7 +287,7 @@ func (m *ProxyRuntimeManager) startWithLease(ctx context.Context, lease *ProxyRu
 		cancel()
 		return nil, err
 	}
-	return &managedProxyRuntime{lease: lease, process: process, configPath: configPath, processCfg: processCfg, proxyID: snapshot.ProxyID, proxyURL: proxyURL}, nil
+	return &managedProxyRuntime{lease: lease, process: process, configPath: configPath, processCfg: processCfg, proxyID: snapshot.ProxyID, ownerUserID: snapshot.OwnerUserID, proxyURL: proxyURL}, nil
 }
 
 func (m *ProxyRuntimeManager) supervise(runtimeID int64, item *managedProxyRuntime) {

@@ -73,6 +73,12 @@ native_proxy_runtime:
   max_restarts: 5
   restart_base_seconds: 1
   restart_max_seconds: 30
+  # Maximum native sing-box processes in this application instance.
+  # 本实例允许同时运行的原生 sing-box 进程上限。
+  max_instances: 64
+  # Maximum native sing-box processes owned by one user in this instance.
+  # 单个用户在本实例允许运行的原生 sing-box 进程上限。
+  max_instances_per_user: 16
 
 # =============================================================================
 # Run Mode Configuration
