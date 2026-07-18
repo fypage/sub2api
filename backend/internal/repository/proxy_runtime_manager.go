@@ -248,6 +248,7 @@ func (m *ProxyRuntimeManager) Start(ctx context.Context, runtimeID int64) error 
 	}
 	m.items[runtimeID] = started
 	m.completeReservation(snapshot.OwnerUserID)
+	reserved = false
 	m.wg.Add(1)
 	m.mu.Unlock()
 	go m.supervise(runtimeID, started)
@@ -429,14 +430,20 @@ func (m *ProxyRuntimeManager) Reconfigure(ctx context.Context, runtimeID int64, 
 			lease.Release()
 			return nil
 		}
+		if err := m.reserveInstance(snapshot.OwnerUserID); err != nil {
+			lease.Release()
+			return err
+		}
 		started, err := m.startWithLease(ctx, lease)
 		if err != nil {
+			m.releaseReservation(snapshot.OwnerUserID)
 			_ = lease.MarkFailed(context.Background(), runtimeFailureCode(err), stableRuntimeError(err), false)
 			lease.Release()
 			return err
 		}
 		m.mu.Lock()
 		m.items[runtimeID] = started
+		m.completeReservation(snapshot.OwnerUserID)
 		m.wg.Add(1)
 		m.mu.Unlock()
 		go m.supervise(runtimeID, started)
@@ -446,9 +453,19 @@ func (m *ProxyRuntimeManager) Reconfigure(ctx context.Context, runtimeID int64, 
 	if err != nil {
 		return err
 	}
-	if err := m.validateReplacementConfig(ctx, snapshot, encrypted); err != nil {
+	if err := m.reserveInstance(snapshot.OwnerUserID); err != nil {
 		return err
 	}
+	if err := m.validateReplacementConfig(ctx, snapshot, encrypted); err != nil {
+		m.releaseReservation(snapshot.OwnerUserID)
+		return err
+	}
+	reserved := true
+	defer func() {
+		if reserved {
+			m.releaseReservation(snapshot.OwnerUserID)
+		}
+	}()
 	item.mu.Lock()
 	item.stopping = true
 	process := item.process
@@ -486,6 +503,7 @@ func (m *ProxyRuntimeManager) Reconfigure(ctx context.Context, runtimeID int64, 
 	}
 	m.items[runtimeID] = started
 	m.completeReservation(snapshot.OwnerUserID)
+	reserved = false
 	m.wg.Add(1)
 	m.mu.Unlock()
 	go m.supervise(runtimeID, started)
