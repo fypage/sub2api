@@ -19,7 +19,7 @@ func TestProxyRuntimeLifecycleLeaseTransitionsAtomically(t *testing.T) {
 		t.Fatalf("lease acquisition failed: %v %v", acquired, err)
 	}
 
-	mock.ExpectQuery("SELECT r.id, r.proxy_id, r.normalized_config_encrypted").WithArgs(int64(42)).
+	mock.ExpectQuery("SELECT r.id, r.proxy_id, r.owner_user_id, r.normalized_config_encrypted").WithArgs(int64(42)).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "proxy_id", "owner_user_id", "normalized_config_encrypted", "encryption_version", "node_fingerprint", "source_node_key", "listen_host", "listen_port", "username", "password", "status", "auto_start", "restart_count"}).
 			AddRow(42, 9, nil, "prx:v1:key:config:cipher", 1, strings.Repeat("a", 64), "", "127.0.0.1", 21001, "runtime-user-001", "runtime-password-0000000000000000", "pending", true, 0))
 	snapshot, err := lease.Snapshot(context.Background())
