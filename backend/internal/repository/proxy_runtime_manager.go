@@ -156,6 +156,27 @@ func (m *ProxyRuntimeManager) Recover(ctx context.Context) error {
 	return nil
 }
 
+func (m *ProxyRuntimeManager) checkInstanceLimit(ownerID *int64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	active := len(m.items) + m.reservations
+	if active >= m.maxInstances {
+		return ErrProxyRuntimeInstanceLimit
+	}
+	if ownerID != nil {
+		owned := m.userReservations[*ownerID]
+		for _, item := range m.items {
+			if item.ownerUserID != nil && *item.ownerUserID == *ownerID {
+				owned++
+			}
+		}
+		if owned >= m.maxPerUser {
+			return ErrProxyRuntimeUserLimit
+		}
+	}
+	return nil
+}
+
 func (m *ProxyRuntimeManager) reserveInstance(ownerID *int64) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
