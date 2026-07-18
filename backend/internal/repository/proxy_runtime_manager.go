@@ -52,19 +52,21 @@ type managedProxyRuntime struct {
 }
 
 type ProxyRuntimeManager struct {
-	enabled       bool
-	repository    *ProxyRuntimeRepository
-	keyring       *runtimecrypto.Keyring
-	store         proxyruntime.ConfigStore
-	starter       runtimeProcessStarter
-	policy        proxyruntime.RestartPolicy
-	qualityGate   RuntimeQualityGate
-	binaryPath    string
-	readyTimeout  time.Duration
-	probeInterval time.Duration
-	stopTimeout   time.Duration
-	maxInstances  int
-	maxPerUser    int
+	enabled          bool
+	repository       *ProxyRuntimeRepository
+	keyring          *runtimecrypto.Keyring
+	store            proxyruntime.ConfigStore
+	starter          runtimeProcessStarter
+	policy           proxyruntime.RestartPolicy
+	qualityGate      RuntimeQualityGate
+	binaryPath       string
+	readyTimeout     time.Duration
+	probeInterval    time.Duration
+	stopTimeout      time.Duration
+	maxInstances     int
+	maxPerUser       int
+	reservations     int
+	userReservations map[int64]int
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -132,7 +134,7 @@ func NewProxyRuntimeManager(repo *ProxyRuntimeRepository, keyring *runtimecrypto
 		binaryPath: options.BinaryPath, readyTimeout: options.ReadyTimeout,
 		probeInterval: options.ProbeInterval, stopTimeout: options.StopTimeout,
 		maxInstances: options.MaxInstances, maxPerUser: options.MaxPerUser,
-		ctx: ctx, cancel: cancel, items: make(map[int64]*managedProxyRuntime),
+		ctx: ctx, cancel: cancel, items: make(map[int64]*managedProxyRuntime), userReservations: make(map[int64]int),
 	}, nil
 }
 
@@ -154,27 +156,49 @@ func (m *ProxyRuntimeManager) Recover(ctx context.Context) error {
 	return nil
 }
 
-func (m *ProxyRuntimeManager) checkInstanceLimit(ownerID *int64) error {
+func (m *ProxyRuntimeManager) reserveInstance(ownerID *int64) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	active := 0
-	owned := 0
-	for _, item := range m.items {
-		if item == nil {
-			continue
-		}
-		active++
-		if ownerID != nil && item.ownerUserID != nil && *ownerID == *item.ownerUserID {
-			owned++
-		}
-	}
+	active := len(m.items) + m.reservations
 	if active >= m.maxInstances {
 		return ErrProxyRuntimeInstanceLimit
 	}
-	if ownerID != nil && owned >= m.maxPerUser {
-		return ErrProxyRuntimeUserLimit
+	if ownerID != nil {
+		if m.userReservations == nil {
+			m.userReservations = make(map[int64]int)
+		}
+		owned := 0
+		for _, item := range m.items {
+			if item.ownerUserID != nil && *item.ownerUserID == *ownerID {
+				owned++
+			}
+		}
+		owned += m.userReservations[*ownerID]
+		if owned >= m.maxPerUser {
+			return ErrProxyRuntimeUserLimit
+		}
+		m.userReservations[*ownerID]++
 	}
+	m.reservations++
 	return nil
+}
+
+func (m *ProxyRuntimeManager) completeReservation(ownerID *int64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.reservations > 0 {
+		m.reservations--
+	}
+	if ownerID != nil && m.userReservations[*ownerID] > 0 {
+		m.userReservations[*ownerID]--
+		if m.userReservations[*ownerID] == 0 {
+			delete(m.userReservations, *ownerID)
+		}
+	}
+}
+
+func (m *ProxyRuntimeManager) releaseReservation(ownerID *int64) {
+	m.completeReservation(ownerID)
 }
 
 func (m *ProxyRuntimeManager) Start(ctx context.Context, runtimeID int64) error {
@@ -200,12 +224,14 @@ func (m *ProxyRuntimeManager) Start(ctx context.Context, runtimeID int64) error 
 		lease.Release()
 		return err
 	}
-	if err := m.checkInstanceLimit(snapshot.OwnerUserID); err != nil {
+	if err := m.reserveInstance(snapshot.OwnerUserID); err != nil {
 		lease.Release()
 		return err
 	}
 	started, err := m.startWithLease(ctx, lease)
 	if err != nil {
+		m.releaseReservation(snapshot.OwnerUserID)
+
 		_ = lease.MarkFailed(context.Background(), runtimeFailureCode(err), stableRuntimeError(err), false)
 		lease.Release()
 		return err
@@ -213,6 +239,7 @@ func (m *ProxyRuntimeManager) Start(ctx context.Context, runtimeID int64) error 
 	m.mu.Lock()
 	if _, exists := m.items[runtimeID]; exists {
 		m.mu.Unlock()
+		m.releaseReservation(snapshot.OwnerUserID)
 		stopCtx, cancel := context.WithTimeout(context.Background(), started.processCfg.StopTimeout+time.Second)
 		_ = started.process.Stop(stopCtx)
 		cancel()
@@ -220,6 +247,7 @@ func (m *ProxyRuntimeManager) Start(ctx context.Context, runtimeID int64) error 
 		return ErrProxyRuntimeAlreadyManaged
 	}
 	m.items[runtimeID] = started
+	m.completeReservation(snapshot.OwnerUserID)
 	m.wg.Add(1)
 	m.mu.Unlock()
 	go m.supervise(runtimeID, started)
@@ -449,6 +477,7 @@ func (m *ProxyRuntimeManager) Reconfigure(ctx context.Context, runtimeID int64, 
 	m.mu.Lock()
 	if _, conflict := m.items[runtimeID]; conflict {
 		m.mu.Unlock()
+		m.releaseReservation(snapshot.OwnerUserID)
 		stopCtx, cancel := context.WithTimeout(context.Background(), started.processCfg.StopTimeout+time.Second)
 		_ = started.process.Stop(stopCtx)
 		cancel()
@@ -456,6 +485,7 @@ func (m *ProxyRuntimeManager) Reconfigure(ctx context.Context, runtimeID int64, 
 		return ErrProxyRuntimeAlreadyManaged
 	}
 	m.items[runtimeID] = started
+	m.completeReservation(snapshot.OwnerUserID)
 	m.wg.Add(1)
 	m.mu.Unlock()
 	go m.supervise(runtimeID, started)

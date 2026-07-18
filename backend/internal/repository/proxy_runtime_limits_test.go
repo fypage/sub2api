@@ -15,15 +15,16 @@ func TestProxyRuntimeManagerInstanceLimits(t *testing.T) {
 			1: {proxyID: 101, ownerUserID: &owner},
 		},
 	}
-	if err := manager.checkInstanceLimit(&owner); !errors.Is(err, ErrProxyRuntimeUserLimit) {
-		t.Fatalf("expected per-user limit, got %v", err)
+	if err := manager.reserveInstance(&owner); !errors.Is(err, ErrProxyRuntimeUserLimit) {
+		t.Fatalf("expected per-user reservation limit, got %v", err)
 	}
-	if err := manager.checkInstanceLimit(&other); err != nil {
+	if err := manager.reserveInstance(&other); err != nil {
 		t.Fatalf("different user should fit global limit: %v", err)
 	}
+	manager.releaseReservation(&other)
 	manager.items[2] = &managedProxyRuntime{proxyID: 102, ownerUserID: &other}
-	if err := manager.checkInstanceLimit(nil); !errors.Is(err, ErrProxyRuntimeInstanceLimit) {
-		t.Fatalf("expected global limit, got %v", err)
+	if err := manager.reserveInstance(nil); !errors.Is(err, ErrProxyRuntimeInstanceLimit) {
+		t.Fatalf("expected global reservation limit, got %v", err)
 	}
 }
 
