@@ -118,9 +118,7 @@ RUN apk add --no-cache ca-certificates curl tar && \
 # -----------------------------------------------------------------------------
 # Stage 5: Final Runtime Image
 # -----------------------------------------------------------------------------
-FROM ${ALPINE_IMAGE}
-
-# Labels
+FROM ${ALPINE_IMAGE} AS final
 LABEL maintainer="Wei-Shaw <github.com/Wei-Shaw>"
 LABEL description="Sub2API - AI API Gateway Platform"
 LABEL org.opencontainers.image.source="https://github.com/Wei-Shaw/sub2api"
