@@ -204,9 +204,7 @@ func (m *ProxyRuntimeManager) reserveInstance(ownerID *int64) error {
 	return nil
 }
 
-func (m *ProxyRuntimeManager) completeReservation(ownerID *int64) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+func (m *ProxyRuntimeManager) completeReservationLocked(ownerID *int64) {
 	if m.reservations > 0 {
 		m.reservations--
 	}
@@ -219,7 +217,9 @@ func (m *ProxyRuntimeManager) completeReservation(ownerID *int64) {
 }
 
 func (m *ProxyRuntimeManager) releaseReservation(ownerID *int64) {
-	m.completeReservation(ownerID)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.completeReservationLocked(ownerID)
 }
 
 func (m *ProxyRuntimeManager) Start(ctx context.Context, runtimeID int64) error {
@@ -268,8 +268,7 @@ func (m *ProxyRuntimeManager) Start(ctx context.Context, runtimeID int64) error 
 		return ErrProxyRuntimeAlreadyManaged
 	}
 	m.items[runtimeID] = started
-	m.completeReservation(snapshot.OwnerUserID)
-	reserved = false
+	m.completeReservationLocked(snapshot.OwnerUserID)
 	m.wg.Add(1)
 	m.mu.Unlock()
 	go m.supervise(runtimeID, started)
@@ -464,7 +463,7 @@ func (m *ProxyRuntimeManager) Reconfigure(ctx context.Context, runtimeID int64, 
 		}
 		m.mu.Lock()
 		m.items[runtimeID] = started
-		m.completeReservation(snapshot.OwnerUserID)
+		m.completeReservationLocked(snapshot.OwnerUserID)
 		m.wg.Add(1)
 		m.mu.Unlock()
 		go m.supervise(runtimeID, started)
@@ -523,7 +522,7 @@ func (m *ProxyRuntimeManager) Reconfigure(ctx context.Context, runtimeID int64, 
 		return ErrProxyRuntimeAlreadyManaged
 	}
 	m.items[runtimeID] = started
-	m.completeReservation(snapshot.OwnerUserID)
+	m.completeReservationLocked(snapshot.OwnerUserID)
 	reserved = false
 	m.wg.Add(1)
 	m.mu.Unlock()
