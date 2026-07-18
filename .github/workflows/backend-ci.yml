@@ -69,11 +69,20 @@ jobs:
           docker run --rm sub2api-sing-box-ci:${{ github.sha }} /usr/local/bin/sing-box version | grep -q 'sing-box version 1.13.14'
       - name: Export verified runtime image
         run: docker save sub2api-sing-box-ci:${{ github.sha }} | gzip -1 > sub2api-sing-box-${{ github.sha }}.tar.gz
+      - name: Build verified full application image
+        run: docker build --target final -t sub2api-native-ci:${{ github.sha }} .
+      - name: Verify full application image contains pinned sing-box
+        run: |
+          docker run --rm sub2api-native-ci:${{ github.sha }} /usr/local/bin/sing-box version | grep -q 'sing-box version 1.13.14'
+      - name: Export verified application image
+        run: docker save sub2api-native-ci:${{ github.sha }} | gzip -1 > sub2api-native-${{ github.sha }}.tar.gz
       - name: Upload verified runtime image
         uses: actions/upload-artifact@v6
         with:
           name: sub2api-sing-box-${{ github.sha }}
-          path: sub2api-sing-box-${{ github.sha }}.tar.gz
+          path: |
+            sub2api-sing-box-${{ github.sha }}.tar.gz
+            sub2api-native-${{ github.sha }}.tar.gz
           retention-days: 7
 
   golangci-lint:
