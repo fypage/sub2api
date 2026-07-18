@@ -473,19 +473,9 @@ func (m *ProxyRuntimeManager) Reconfigure(ctx context.Context, runtimeID int64, 
 	if err != nil {
 		return err
 	}
-	if err := m.reserveInstance(snapshot.OwnerUserID); err != nil {
-		return err
-	}
 	if err := m.validateReplacementConfig(ctx, snapshot, encrypted); err != nil {
-		m.releaseReservation(snapshot.OwnerUserID)
 		return err
 	}
-	reserved := true
-	defer func() {
-		if reserved {
-			m.releaseReservation(snapshot.OwnerUserID)
-		}
-	}()
 	item.mu.Lock()
 	item.stopping = true
 	process := item.process
@@ -500,30 +490,26 @@ func (m *ProxyRuntimeManager) Reconfigure(ctx context.Context, runtimeID int64, 
 		m.remove(runtimeID, item, true)
 		return err
 	}
-	m.remove(runtimeID, item, false)
 	if err := item.lease.UpdateConfig(ctx, encrypted, fingerprint, sourceNodeKey); err != nil {
-		item.lease.Release()
+		m.remove(runtimeID, item, true)
 		return err
 	}
 	started, err := m.startWithLease(ctx, item.lease)
 	if err != nil {
 		_ = item.lease.MarkFailed(context.Background(), runtimeFailureCode(err), stableRuntimeError(err), false)
-		item.lease.Release()
+		m.remove(runtimeID, item, true)
 		return err
 	}
 	m.mu.Lock()
-	if _, conflict := m.items[runtimeID]; conflict {
+	if current, exists := m.items[runtimeID]; !exists || current != item {
 		m.mu.Unlock()
-		m.releaseReservation(snapshot.OwnerUserID)
 		stopCtx, cancel := context.WithTimeout(context.Background(), started.processCfg.StopTimeout+time.Second)
 		_ = started.process.Stop(stopCtx)
 		cancel()
 		item.lease.Release()
-		return ErrProxyRuntimeAlreadyManaged
+		return ErrProxyRuntimeStateConflict
 	}
 	m.items[runtimeID] = started
-	m.completeReservationLocked(snapshot.OwnerUserID)
-	reserved = false
 	m.wg.Add(1)
 	m.mu.Unlock()
 	go m.supervise(runtimeID, started)
