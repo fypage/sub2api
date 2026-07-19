@@ -83,7 +83,7 @@ func TestProxyRuntimeRepositoryAllocatesPortInsideTransaction(t *testing.T) {
 	mock.ExpectBegin()
 	expectRuntimeSource(mock, 11)
 	mock.ExpectExec("pg_advisory_xact_lock").WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectQuery("SELECT candidate").WithArgs(21000, 21999).
+	mock.ExpectQuery("SELECT candidate[\\s\\S]+generate_series\\(\\$1::int, \\$2::int\\)").WithArgs(21000, 21999).
 		WillReturnRows(sqlmock.NewRows([]string{"candidate"}).AddRow(21008))
 	mock.ExpectQuery("INSERT INTO proxies[\\s\\S]+VALUES \\(\\$1, 'socks5h'").
 		WithArgs("node", "127.0.0.1", 21008, "runtime-user-001", strings.Repeat("p", 32), "none", nil).

@@ -125,7 +125,7 @@ func allocateRuntimePortTx(ctx context.Context, tx *sql.Tx, first, last int) (in
 	var port int
 	err := tx.QueryRowContext(ctx, `
 SELECT candidate
-FROM generate_series($1, $2) AS candidate
+FROM generate_series($1::int, $2::int) AS candidate
 WHERE NOT EXISTS (
     SELECT 1 FROM proxy_runtimes
     WHERE deleted_at IS NULL AND listen_host = '127.0.0.1' AND listen_port = candidate
