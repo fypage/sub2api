@@ -189,7 +189,7 @@ func (l *ProxyRuntimeLease) MarkStarting(ctx context.Context) error {
 	return l.transition(ctx, []string{"pending", "stopped", "error", "degraded", "blocked", "healthy", "starting"}, `
 WITH changed AS (
     UPDATE proxy_runtimes
-    SET status = 'starting', pid = NULL, config_path = NULL,
+    SET status = 'starting', pid = NULL, config_path = NULL, auto_start = TRUE,
         last_error_code = NULL, last_error_redacted = NULL,
         last_started_at = NOW(), updated_at = NOW()
     WHERE proxy_runtimes.id = $1 AND proxy_runtimes.deleted_at IS NULL AND status = ANY($2)
