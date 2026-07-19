@@ -280,7 +280,7 @@ func (m *ProxyRuntimeManager) startWithLease(ctx context.Context, lease *ProxyRu
 	if err != nil {
 		return nil, err
 	}
-	if !snapshot.AutoStart && snapshot.Status != "pending" {
+	if !snapshot.AutoStart && snapshot.Status != "pending" && snapshot.Status != "stopped" {
 		return nil, ErrProxyRuntimeStateConflict
 	}
 	if err := lease.MarkStarting(ctx); err != nil {
