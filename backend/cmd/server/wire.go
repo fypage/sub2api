@@ -110,6 +110,8 @@ func provideCleanup(
 	paymentOrderExpiry *service.PaymentOrderExpiryService,
 	channelMonitorRunner *service.ChannelMonitorRunner,
 	quotaFlusher *service.UserPlatformQuotaUsageFlusher,
+	proxyRuntimeManager *repository.ProxyRuntimeManager,
+	proxySubscriptionRefresher *repository.ProxySubscriptionRefresher,
 	upstreamBillingProbe *service.UpstreamBillingProbeService,
 	auditLog *service.AuditLogService,
 	promptAudit *securityaudit.PromptService,
@@ -125,6 +127,18 @@ func provideCleanup(
 
 		// 应用层清理步骤可并行执行，基础设施资源（Redis/Ent）最后按顺序关闭。
 		parallelSteps := []cleanupStep{
+			{"ProxySubscriptionRefresher", func() error {
+				if proxySubscriptionRefresher != nil {
+					return proxySubscriptionRefresher.Stop(ctx)
+				}
+				return nil
+			}},
+			{"ProxyRuntimeManager", func() error {
+				if proxyRuntimeManager != nil {
+					return proxyRuntimeManager.StopAll(ctx)
+				}
+				return nil
+			}},
 			{"OpsIngressRejectAggregator", func() error {
 				if opsIngressReject != nil {
 					opsIngressReject.Stop()
