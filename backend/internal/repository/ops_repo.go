@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -14,6 +15,38 @@ import (
 
 type opsRepository struct {
 	db *sql.DB
+}
+
+// DeletedAPIKeyAudit preserves ownership metadata for a removed API key.
+type DeletedAPIKeyAudit struct {
+	ID        int64
+	Key       string
+	APIKeyID  int64
+	UserID    int64
+	KeyName   string
+	DeletedAt time.Time
+}
+
+func (r *opsRepository) LookupDeletedKeyAudit(ctx context.Context, key string) (*DeletedAPIKeyAudit, error) {
+	if r == nil || r.db == nil {
+		return nil, fmt.Errorf("nil ops repository")
+	}
+	const q = `SELECT id, key, api_key_id, user_id, key_name, deleted_at
+		FROM deleted_api_key_audits
+		WHERE key = $1
+		ORDER BY deleted_at DESC, id DESC
+		LIMIT 1`
+	var out DeletedAPIKeyAudit
+	err := r.db.QueryRowContext(ctx, q, key).Scan(
+		&out.ID, &out.Key, &out.APIKeyID, &out.UserID, &out.KeyName, &out.DeletedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
 }
 
 const insertOpsErrorLogSQL = `
